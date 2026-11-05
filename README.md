@@ -67,6 +67,24 @@ GEMINI_MODEL=gemini-3.1-flash-lite    # voliteľné; predvolený je lacný multi
 
 Jeden bloček stojí približne 1 500 vstupných tokenov. Koncept má limit 150 volaní Gemini.
 
+## Verejný prístup cez Tailscale Funnel (bez domény a verejnej IP)
+
+Tailscale Funnel zadarmo sprístupní portál na stálej HTTPS adrese `https://kbm.<váš-tailnet>.ts.net`. Návštevníci nič neinštalujú. Počítač s Dockerom musí byť zapnutý.
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh   # inštalácia (oficiálny skript)
+sudo tailscale up                                   # otvorte vypísaný odkaz a prihláste sa (bezplatný účet)
+sudo tailscale set --hostname=kbm
+sudo tailscale funnel --bg 8090                     # pri prvom spustení vypíše odkaz na povolenie HTTPS a Funnel
+tailscale funnel status                             # ukáže verejnú adresu
+```
+
+Potom v `.env` nastavte `COOKIE_SECURE=1` a `BIND_ADDRESS=127.0.0.1` a spustite `docker compose up -d --build`. Portál bude dostupný iba cez HTTPS odkaz, priama adresa `http://IP_SERVERA:8090` prestane fungovať. Nginx berie skutočnú IP návštevníka z `X-Forwarded-For`, preto musí port ostať viazaný na `127.0.0.1`.
+
+Pred zdieľaním odkazu si každý zmení počiatočné heslo (ozubené koliesko na hlavnej stránke). Všetky účty majú na začiatku rovnaké `DEMO_PASSWORD`. Ide stále o testovací prototyp; databázy pravidelne zálohujte.
+
+Vypnutie verejného prístupu: `sudo tailscale funnel --https=443 off`. Pre prístup cez LAN potom vráťte `COOKIE_SECURE=0` a `BIND_ADDRESS=0.0.0.0`.
+
 ## Bežné príkazy
 
 ```bash
