@@ -149,3 +149,33 @@ def test_todos(client, clock):
     assert client.post('/api/journal/todos/clear-done', headers=h).json() == {'deleted': 1}
     assert [x['text'] for x in client.get('/api/journal/todos', headers=h).json()] == ['Nasadiť']
     assert client.get('/api/journal/todos', headers=auth(client, OTHER)).json() == []
+
+
+def test_overview_and_project_stats(client, clock):
+    h = auth(client, EMP)
+    client.put('/api/holidays', headers=auth(client), json={'date': '2026-11-17', 'name': 'Sviatok test'})
+    client.put('/api/journal/days/2026-11-02', headers=h, json={'segments': [{'start': '08:00', 'end': '16:00'}]})   # pondelok
+    client.put('/api/journal/days/2026-10-30', headers=h, json={'segments': [{'start': '08:00', 'end': '12:00'}]})   # iný mesiac
+    clock.set('2026-11-05 10:00')
+    punch(client, 'in', '2026-11-05T08:00', 'ov-000001')                                                             # beží, 2 h
+    pid = client.post('/api/journal/projects', headers=h, json={'name': 'Web', 'customer_name': 'ACME'}).json()['id']
+    t1 = client.post('/api/journal/tasks', headers=h, json={'name': 'Frontend', 'project_id': pid}).json()['id']
+    t2 = client.post('/api/journal/tasks', headers=h, json={'name': 'Volné'}).json()['id']
+    for tid, day, a, b in [(t1, '2026-11-02', '08:00', '12:00'), (t1, '2026-11-05', '08:00', '09:30'), (t2, '2026-11-02', '13:00', None), (t2, '2026-10-30', '09:00', '10:00')]:
+        client.post('/api/journal/activities', headers=h, json={'task_id': tid, 'date': day, 'start': a, 'end': b, 'text': 'x'})
+    o = client.get('/api/journal/overview?month=2026-11', headers=h).json()
+    assert len(o['days']) == 30 and o['is_current']
+    by = {d['date']: d for d in o['days']}
+    assert by['2026-11-02']['worked_min'] == 480 and by['2026-11-02']['logged_min'] == 240
+    assert by['2026-11-05']['open'] and by['2026-11-05']['worked_min'] == 120
+    assert by['2026-11-07']['weekend'] and by['2026-11-17']['holiday'] == 'Sviatok test'
+    assert o['totals'] == {'worked_min': 600, 'logged_min': 330, 'worked_days': 2, 'avg_closed_min': 480}
+    assert o['today'] == {'date': '2026-11-05', 'worked_min': 120, 'logged_min': 90}
+    assert o['week'] == {'worked_min': 600, 'logged_min': 330}
+    past = client.get('/api/journal/overview?month=2026-10', headers=h).json()
+    assert not past['is_current'] and past['today'] is None and past['totals']['worked_min'] == 240
+    stats = client.get('/api/journal/project-stats', headers=h).json()
+    assert [(s['project'], s['customer'], s['minutes'], s['count']) for s in stats] == [('Web', 'ACME', 330, 2), ('Bez projektu', '', 60, 2)]
+    nov = client.get('/api/journal/project-stats?start=2026-11-01&end=2026-11-30', headers=h).json()
+    assert [(s['project'], s['minutes'], s['count']) for s in nov] == [('Web', 330, 2), ('Bez projektu', 0, 1)]
+    assert client.get('/api/journal/overview?month=2026-11&user_id=2', headers=auth(client, OTHER)).status_code == 403

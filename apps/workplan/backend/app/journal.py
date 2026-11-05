@@ -14,7 +14,8 @@ from sqlalchemy.orm import Session
 from .db import get_db
 from .models import User, Customer, Project, Task, WorkDay, WorkSegment, Activity, Todo, WorkPunch, name_key
 from .security import current_user
-from .common import TZ, audit, commit, owner, employee, month_bounds
+from .common import TZ, audit, commit, owner, employee, month_bounds, get_settings, days as date_range
+from .models import Holiday
 from . import journal_calc as jc
 
 router = APIRouter(prefix='/api/journal', tags=['journal'])
@@ -701,6 +702,74 @@ def clear_done_todos(user_id: int | None = None, u=Depends(current_user), db: Se
     audit_foreign(db, u, uid, 'journal.todo.clear_done', n)
     commit(db)
     return {'deleted': n}
+
+
+# ---------------------------------------------------------------- prehľady
+
+def logged_by_day(db, uid, start: date, end: date) -> dict:
+    """Odpísané minúty v aktivitách podľa dňa začiatku (len aktivity s trvaním), ako loggedByDay()."""
+    out = {}
+    q = select(Activity.start_at, Activity.minutes).where(Activity.user_id == uid, Activity.minutes > 0,
+                                                         Activity.start_at >= utc(at_local(start, '00:00')),
+                                                         Activity.start_at < utc(at_local(end + timedelta(days=1), '00:00')))
+    for start_at, minutes in db.execute(q):
+        d = local(start_at).date()
+        out[d] = out.get(d, 0) + minutes
+    return out
+
+
+@router.get('/overview')
+def overview(month: str, user_id: int | None = None, u=Depends(current_user), db: Session = Depends(get_db)):
+    """Mesiac po dňoch: v práci (úseky), prestávky, odpísané (aktivity); súčty a pre aktuálny mesiac dnes/týždeň."""
+    uid = target_user(u, user_id, db)
+    start, end = month_bounds(month)
+    n = now()
+    ak = jc.active_day(records_around(db, uid, n), n)
+    wds = load_days(db, uid, start, end)
+    logged = logged_by_day(db, uid, start, end)
+    weekends = set(get_settings(db)['weekends'])
+    holidays = {h.date: h.name for h in db.scalars(select(Holiday).where(Holiday.date.between(start, end)))}
+    rows, worked, closed_w, closed_d, worked_days = [], 0, 0, 0, 0
+    for d in date_range(start, end):
+        day = day_out(d, rec_of(wds.get(d)), n, ak)
+        day.update(weekend=d.weekday() in weekends, holiday=holidays.get(d), logged_min=logged.get(d, 0))
+        rows.append(day)
+        if day['worked_min'] > 0:
+            worked += day['worked_min']; worked_days += 1
+            if not day['open']: closed_w += day['worked_min']; closed_d += 1
+    result = {'month': month, 'is_current': start <= n.date() <= end, 'days': rows,
+              'totals': {'worked_min': worked, 'logged_min': sum(logged.values()), 'worked_days': worked_days,
+                         'avg_closed_min': round(closed_w / closed_d) if closed_d else None},
+              'today': None, 'week': None}
+    if result['is_current']:
+        monday = n.date() - timedelta(days=n.date().weekday())
+        week_days = load_days(db, uid, monday, n.date())
+        week_logged = logged_by_day(db, uid, monday, n.date())
+        result['week'] = {'worked_min': sum(day_out(d, rec_of(wd), n, ak)['worked_min'] for d, wd in week_days.items()),
+                          'logged_min': sum(week_logged.values())}
+        today = day_out(ak, rec_of(load_days(db, uid, ak, ak).get(ak)), n, ak)
+        result['today'] = {'date': ak.isoformat(), 'worked_min': today['worked_min'], 'logged_min': logged_by_day(db, uid, ak, ak).get(ak, 0)}
+    return result
+
+
+@router.get('/project-stats')
+def project_stats(start: date | None = None, end: date | None = None, user_id: int | None = None, u=Depends(current_user), db: Session = Depends(get_db)):
+    """Aktivity podľa projektu a zákazníka (renderProjectStats); bez rozsahu za celé obdobie."""
+    uid = target_user(u, user_id, db)
+    q = select(Activity.task_id, Activity.minutes).where(Activity.user_id == uid)
+    if start: q = q.where(Activity.start_at >= utc(at_local(start, '00:00')))
+    if end: q = q.where(Activity.start_at < utc(at_local(end + timedelta(days=1), '00:00')))
+    customers_, projects_, tasks_ = catalog(db)
+    groups = {}
+    for tid, minutes in db.execute(q):
+        t = tasks_.get(tid)
+        p = projects_.get(t.project_id) if t else None
+        c = customers_.get(p.customer_id if p else (t.customer_id if t else None))
+        key = (p.id if p else None, c.name if c else '')
+        g = groups.setdefault(key, {'project_id': key[0], 'project': p.name if p else 'Bez projektu', 'customer': key[1], 'minutes': 0, 'count': 0})
+        g['count'] += 1
+        g['minutes'] += minutes or 0
+    return sorted(groups.values(), key=lambda g: (-g['minutes'], -g['count'], g['project'].casefold()))
 
 
 # ---------------------------------------------------------------- import zo starého denníka
