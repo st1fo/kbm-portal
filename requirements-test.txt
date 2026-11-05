@@ -1,0 +1,4 @@
+-r apps/workplan/backend/requirements.txt
+-r apps/vehicle-logbook/backend/requirements.txt
+pytest==9.0.2
+httpx==0.28.1

@@ -1,0 +1,1841 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Pracovný denník</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  /* Layout: top command bar (live clock + clock-in). Left: write-activity panel + activity log. Right: projects, time stats. */
+  :root {
+    --bg: #f3f4f6; --surface: #ffffff; --surface-2: #eceef2; --fg: #1a1f2b; --muted: #5b6472;
+    --border: #d8dce3; --accent: #0f766e; --accent-weak: #d6ece9; --warn: #a4590a; --warn-weak: #f6e7d0;
+    --danger: #b02a3a; --danger-weak: #f3d9dd;
+    --shadow: 0 1px 2px rgba(20,25,40,.06), 0 6px 20px rgba(20,25,40,.05);
+    --font-display: "IBM Plex Sans", system-ui, sans-serif;
+    --font-body: "IBM Plex Sans", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #11141b; --surface: #1a1e27; --surface-2: #232834; --fg: #e7eaf0; --muted: #97a0b0;
+      --border: #2d333f; --accent: #37b7a6; --accent-weak: #16302e; --warn: #d79444; --warn-weak: #35291a;
+      --danger: #e2697a; --danger-weak: #342026;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.25); color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #11141b; --surface: #1a1e27; --surface-2: #232834; --fg: #e7eaf0; --muted: #97a0b0;
+    --border: #2d333f; --accent: #37b7a6; --accent-weak: #16302e; --warn: #d79444; --warn-weak: #35291a;
+    --danger: #e2697a; --danger-weak: #342026;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.25); color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--font-body); line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1500px; margin: 0 auto; padding-left: max(18px, env(safe-area-inset-left, 0px)); padding-right: max(18px, env(safe-area-inset-right, 0px)); padding-block: 18px 48px; display: flex; flex-direction: column; gap: 16px; }
+  .topbar { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .brand { display: flex; flex-direction: column; gap: 1px; }
+  h1 { font-family: var(--font-display); font-size: 1.4rem; font-weight: 600; margin: 0; letter-spacing: -.01em; }
+  .brand .sub { color: var(--muted); font-size: .82rem; }
+  .theme-btn { border: 1px solid var(--border); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 6px 14px; font: inherit; font-size: .8rem; cursor: pointer; }
+  .theme-btn:hover { color: var(--fg); }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px; box-shadow: var(--shadow); }
+  .card h2 { font-family: var(--font-display); font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 14px; }
+
+  /* command bar */
+  .cmdbar { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px; }
+  .now { display: flex; flex-direction: column; gap: 2px; flex: 0 0 auto; }
+  .now-clock { font-family: var(--font-mono); font-size: clamp(2.2rem, 6vw, 3.1rem); font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1; }
+  .now-date { color: var(--muted); font-size: .8rem; }
+  .live-tag { display: inline-flex; align-items: center; gap: 5px; font-size: .68rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  .live-tag .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+  .presence { display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto; }
+  .status-pill { display: inline-flex; align-items: center; gap: 7px; font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; padding: 5px 12px; border-radius: 999px; background: var(--surface-2); color: var(--muted); align-self: flex-start; }
+  .status-pill .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  body[data-status="in"] .status-pill { background: var(--accent-weak); color: var(--accent); }
+  body[data-status="in"] .status-pill .dot { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+  body[data-status="break"] .status-pill { background: var(--warn-weak); color: var(--warn); }
+  body[data-status="break"] .status-pill .dot { background: var(--warn); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+  @media (prefers-reduced-motion: reduce) { .dot { animation: none !important; } }
+  .today-presence { font-size: .85rem; color: var(--muted); }
+  .today-presence strong { font-family: var(--font-mono); font-weight: 500; color: var(--fg); font-variant-numeric: tabular-nums; }
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; flex: 1 1 auto; }
+  button.btn { font: inherit; font-weight: 600; font-size: .95rem; border-radius: 10px; padding: 11px 20px; border: 1px solid transparent; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+  .btn-primary { background: var(--accent); color: #fff; } .btn-primary:hover { filter: brightness(1.07); }
+  .btn-warn { background: var(--warn-weak); color: var(--warn); border-color: var(--warn); } .btn-warn:hover { filter: brightness(1.03); }
+  .btn-ghost { background: var(--surface-2); color: var(--fg); } .btn-ghost:hover { border-color: var(--border); }
+  .btn-stop { background: transparent; color: var(--danger); border-color: var(--danger); } .btn-stop:hover { background: var(--danger-weak); }
+  button:focus-visible, input:focus-visible, select:focus-visible, .theme-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .dash { display: grid; grid-template-columns: 1fr; gap: 16px; align-items: start; }
+  @media (min-width: 1000px) { .dash { grid-template-columns: 1.45fr 1fr; } }
+  .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+  label.lbl { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; display: block; margin-bottom: 5px; }
+  textarea { font: inherit; font-size: .92rem; line-height: 1.5; padding: 10px 11px; border-radius: 9px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); width: 100%; min-width: 0; resize: vertical; min-height: 96px; display: block; }
+  textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  input[type=time], input[type=date] { font: inherit; font-size: .92rem; padding: 9px 10px; border-radius: 9px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); width: 100%; min-width: 0; font-variant-numeric: tabular-nums; }
+
+  /* attendance */
+  .att-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .att-head h2 { margin: 0; }
+  .att-date { display: flex; align-items: center; gap: 6px; }
+  .att-date input { width: auto; padding: 6px 9px; font-size: .85rem; }
+  .att-date .mini { width: 34px; height: 34px; font-size: 1rem; }
+  .att-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  @media (min-width: 720px) { .att-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) 1.1fr; } }
+  .att-tile { background: var(--surface-2); border-radius: 11px; padding: 11px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; border: 1px solid transparent; }
+  .att-tile .k { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .att-tile .k i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .att-tile.t-in .k i { background: var(--accent); }
+  .att-tile.t-bs .k i, .att-tile.t-be .k i { background: var(--warn); }
+  .att-tile.t-out .k i { background: var(--danger); }
+  .att-tile input { font-family: var(--font-mono); font-size: clamp(.95rem, 3.4vw, 1.15rem); padding: 6px 6px; background: var(--surface); }
+  .att-tile.filled { border-color: var(--border); }
+  .att-tile.total { background: var(--accent-weak); }
+  .att-tile.total .v { font-family: var(--font-mono); font-size: 1.5rem; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1.2; color: var(--fg); }
+  .att-tile.total .sub2 { font-size: .74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .att-tile.total { grid-column: 1 / -1; }
+  @media (min-width: 720px) { .att-tile.total { grid-column: auto; } }
+  .att-body { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; }
+  @media (min-width: 720px) { .att-body { grid-template-columns: minmax(0, 1fr) 240px; } }
+  .seg-wrap { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+  .seg-row { display: flex; align-items: center; gap: 8px; background: var(--surface-2); border-radius: 11px; padding: 8px 10px; flex-wrap: wrap; border: 1px solid transparent; }
+  .seg-row.open { border-color: var(--accent); }
+  .seg-row .no { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; width: 52px; flex: none; }
+  .seg-row .tf { display: flex; flex-direction: column; gap: 2px; flex: 1 1 110px; min-width: 0; }
+  .seg-row .tf small { font-size: .62rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; display: flex; gap: 4px; align-items: center; }
+  .seg-row input[type=time] { font-family: var(--font-mono); font-size: 1rem; padding: 6px 8px; background: var(--surface); }
+  .seg-row .dash { color: var(--muted); padding-top: 14px; }
+  .seg-row .dur { font-family: var(--font-mono); font-size: .85rem; color: var(--accent); min-width: 62px; text-align: right; font-variant-numeric: tabular-nums; padding-top: 14px; }
+  .seg-row .dur.run { color: var(--accent); font-weight: 600; }
+  .seg-row .icon-btn { padding-top: 14px; }
+  @media (max-width: 560px) {
+    .seg-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px 8px; }
+    .seg-row .no { grid-column: 1; grid-row: 1; width: auto; align-self: center; }
+    .seg-row .dur { grid-column: 2; grid-row: 1; padding-top: 0; min-width: 0; align-self: center; }
+    .seg-row .icon-btn { grid-column: 3; grid-row: 1; padding-top: 3px; }
+    .seg-row .dash { display: none; }
+    .seg-row .tf:nth-of-type(1) { grid-column: 1; grid-row: 2; }
+    .seg-row .tf:nth-of-type(2) { grid-column: 2 / 4; grid-row: 2; }
+  }
+  .seg-gap { display: flex; align-items: center; gap: 8px; padding: 4px 0 4px 18px; font-size: .74rem; color: var(--warn); font-variant-numeric: tabular-nums; }
+  .seg-gap::before { content: ""; width: 2px; height: 16px; background: var(--warn); border-radius: 2px; opacity: .5; }
+  .seg-gap.run { font-weight: 600; }
+  .seg-empty { font-size: .86rem; color: var(--muted); padding: 10px 2px; }
+  .seg-add { align-self: flex-start; margin-top: 8px; }
+  .att-tile.total .sub2 + .sub2 { margin-top: -2px; }
+  .hist .segs-cell { font-family: var(--font-body); font-size: .74rem; color: var(--muted); white-space: normal; max-width: 120px; }
+  .att-hint { font-size: .78rem; color: var(--muted); margin-top: 10px; min-height: 1em; }
+  .att-hint.warn { color: var(--warn); }
+  body[data-status="done"] .status-pill { background: var(--surface-2); color: var(--fg); }
+  body[data-status="done"] .status-pill .dot { background: var(--danger); }
+
+  .hist { width: 100%; border-collapse: collapse; font-size: .82rem; margin-top: 16px; font-variant-numeric: tabular-nums; }
+  .hist th { text-align: left; font-size: .66rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; padding: 0 4px 6px; white-space: nowrap; }
+  .hist td { padding: 7px 4px; border-top: 1px solid var(--border); font-family: var(--font-mono); white-space: nowrap; }
+  .hist td:first-child { font-family: var(--font-body); font-weight: 600; }
+  .hist td.num, .hist th.num { text-align: right; }
+  .hist tr { cursor: pointer; }
+  .hist tbody tr:hover td { background: var(--surface-2); }
+  .hist tr.sel td { background: var(--accent-weak); }
+  .hist .dim { color: var(--muted); }
+  .hist sup.nd { font-size: .6rem; color: var(--warn); font-weight: 600; margin-left: 2px; font-family: var(--font-body); }
+  .nd-badge { display: none; font-style: normal; font-size: .62rem; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--warn); background: var(--warn-weak); border-radius: 999px; padding: 0 6px; margin-left: 4px; white-space: nowrap; }
+  .att-tile .k { flex-wrap: wrap; }
+  .next-day .nd-badge { display: inline-block; }
+  .hist-wrap { overflow-x: auto; }
+  .hist td.act, .hist th.act { width: 1%; text-align: right; padding-right: 0; }
+  .hist .icon-btn.edit:hover { color: var(--accent); background: var(--accent-weak); }
+  .hist td.act { white-space: nowrap; }
+  .hist .icon-btn.del { font-size: .85rem; }
+  .hist tr.hist-edit { cursor: default; }
+  .hist tr.hist-edit td, .hist tbody tr.hist-edit:hover td { background: var(--surface-2); border-top: none; padding: 12px; white-space: normal; font-family: var(--font-body); font-weight: 400; }
+  .he-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
+  .he-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .he-field span { font-size: .66rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
+  .he-field input { font-family: var(--font-mono); font-size: 1rem; padding: 7px 8px; background: var(--surface); }
+  .he-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+  .he-info { font-size: .8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .he-info.warn { color: var(--warn); }
+  .he-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  button.btn.btn-sm { font-size: .82rem; padding: 7px 13px; border-radius: 8px; }
+  button.btn:disabled { opacity: .45; cursor: not-allowed; filter: none; }
+  .hist-bar { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+  .hist-title { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+  .hist-add { display: flex; gap: 6px; align-items: center; }
+  .hist-add input { width: auto; padding: 6px 8px; font-size: .82rem; }
+  .hist-bar + .hist-wrap .hist { margin-top: 8px; }
+
+  input[type=text], input[type=number], select { font: inherit; font-size: .92rem; padding: 10px 11px; border-radius: 9px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); width: 100%; min-width: 0; }
+  input::placeholder { color: var(--muted); opacity: .7; }
+  select { cursor: pointer; }
+
+  /* write-activity panel */
+  .pick { display: flex; gap: 8px; align-items: flex-end; }
+  .pick .field { flex: 1; min-width: 0; }
+  .mini { flex: none; border: 1px solid var(--border); background: var(--surface-2); color: var(--fg); border-radius: 9px; width: 42px; height: 40px; font-size: 1.2rem; cursor: pointer; display: grid; place-items: center; line-height: 1; }
+  .mini:hover { border-color: var(--accent); color: var(--accent); }
+  .mini.danger:hover { border-color: var(--danger); color: var(--danger); background: var(--danger-weak); }
+  .stack { display: flex; flex-direction: column; gap: 12px; }
+  .inline-add { display: none; gap: 8px; padding: 11px; background: var(--surface-2); border-radius: 10px; flex-wrap: wrap; align-items: flex-end; }
+  .inline-add.open { display: flex; }
+  .inline-add .field { flex: 1 1 140px; min-width: 0; }
+  .inline-add button { flex: none; }
+  .write-row { display: flex; gap: 8px; align-items: flex-end; }
+  .write-row .f-text { flex: 1; min-width: 0; }
+  .time-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .time-row .f-date { flex: 1 1 150px; min-width: 0; }
+  .time-row .f-time { flex: 1 1 130px; min-width: 0; display: flex; align-items: center; gap: 7px; }
+  .time-row .f-time input { min-width: 0; }
+  .t-sep { font-size: .74rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+  .hint { font-size: .78rem; color: var(--muted); margin-top: 8px; min-height: 1em; }
+  .hint.warn { color: var(--warn); }
+  .act-span { font-size: .78rem; color: var(--muted); margin-top: 6px; min-height: 1em; font-variant-numeric: tabular-nums; }
+  .act-span .nd-badge { display: inline-block; margin: 0 4px 0 0; }
+
+  /* activity log */
+  .log-day { margin-bottom: 16px; } .log-day:last-child { margin-bottom: 0; }
+  .log-day h3 { font-size: .82rem; font-weight: 600; margin: 0 0 8px; display: flex; justify-content: space-between; align-items: baseline; }
+  .log-day h3 .d-total { font-family: var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; font-weight: 400; }
+  .log-item { display: flex; gap: 11px; align-items: flex-start; padding: 9px 0; border-top: 1px solid var(--border); }
+  .log-time { font-family: var(--font-mono); font-size: .8rem; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; padding-top: 2px; }
+  .log-body { flex: 1; min-width: 0; }
+  .log-ctx { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 2px; }
+  .tag { font-size: .7rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .tag.proj { background: var(--accent-weak); color: var(--accent); }
+  .tag.cust { background: var(--surface-2); color: var(--muted); }
+  .tag.task { background: transparent; color: var(--fg); border: 1px solid var(--border); }
+  .log-text { word-break: break-word; white-space: pre-wrap; }
+  .log-min { font-family: var(--font-mono); font-size: .74rem; color: var(--accent); white-space: nowrap; padding-top: 2px; }
+  .log-del { color: var(--muted); border: none; background: none; cursor: pointer; font-size: .9rem; padding: 0 2px; line-height: 1; }
+  .log-del:hover { color: var(--danger); }
+  .log-edit { color: var(--muted); border: none; background: none; cursor: pointer; font-size: .9rem; padding: 0 2px; line-height: 1; }
+  .log-edit:hover { color: var(--accent); }
+  .log-acts { display: flex; gap: 4px; align-items: flex-start; flex: none; }
+  .act-ed { background: var(--surface-2); border: 1px solid var(--accent); border-radius: 11px; padding: 11px; margin: 6px 0; display: flex; flex-direction: column; gap: 8px; }
+  .act-ed .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .act-ed select, .act-ed input, .act-ed textarea { background: var(--surface); font-size: .86rem; }
+  .act-ed select { flex: 1 1 100%; }
+  .act-ed .f-d { flex: 1 1 140px; min-width: 0; }
+  .act-ed .f-t { flex: 1 1 110px; min-width: 0; display: flex; align-items: center; gap: 6px; }
+  .act-ed .f-t input { min-width: 0; }
+  .act-ed textarea { min-height: 80px; }
+  .act-ed .span { font-size: .76rem; color: var(--muted); min-height: 1em; font-variant-numeric: tabular-nums; }
+  .act-ed .span.warn { color: var(--warn); }
+  .act-ed .span .nd-badge { display: inline-block; margin: 0 4px 0 0; }
+  .act-ed .btn-ghost { background: var(--surface); border-color: var(--border); }
+  .act-ed .acts { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; align-items: center; }
+  .act-ed .acts .kb { font-size: .72rem; color: var(--muted); margin-right: auto; }
+  .tdet-act { position: relative; }
+  .tdet-act .log-edit { position: absolute; top: 8px; right: 0; }
+  .tdet-act .tdet-when .m { margin-right: 22px; }
+
+  /* projects manager */
+  .proj-item { padding: 11px 0; border-top: 1px solid var(--border); }
+  .proj-item:first-child { border-top: none; }
+  .proj-row1 { display: flex; align-items: baseline; gap: 8px; }
+  .proj-nm { font-weight: 600; font-size: .95rem; flex: 1; min-width: 0; word-break: break-word; }
+  .proj-cust { font-size: .74rem; color: var(--muted); white-space: nowrap; }
+  .proj-meta { font-size: .74rem; color: var(--muted); margin-top: 2px; }
+  .icon-btn { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 1rem; padding: 3px 6px; border-radius: 6px; line-height: 1; }
+  .icon-btn:hover { color: var(--danger); background: var(--danger-weak); }
+  .tasks-mini { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 4px; }
+  .tasks-mini li { display: flex; align-items: center; gap: 8px; font-size: .86rem; }
+  .tm-toggle { border: none; background: none; color: var(--muted); cursor: pointer; width: 18px; height: 18px; padding: 0; font-size: .75rem; line-height: 1; border-radius: 4px; flex: none; transition: transform .15s ease; }
+  .tm-toggle:hover { color: var(--accent); background: var(--accent-weak); }
+  .tm-toggle.open { transform: rotate(90deg); color: var(--accent); }
+  .tm-name.click { cursor: pointer; }
+  .tm-name.click:hover { color: var(--accent); }
+  .tm-stat { font-size: .7rem; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
+  li.tm-open > .tm-name { font-weight: 600; }
+  li.task-detail { display: block; margin: 2px 0 8px 26px; padding: 10px 12px; background: var(--surface-2); border-radius: 10px; border-left: 3px solid var(--accent); }
+  .tdet-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+  .task-detail .btn-ghost { background: var(--surface); border-color: var(--border); }
+  .tdet-sum { font-size: .78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .tdet-sum strong { color: var(--fg); font-weight: 600; }
+  .tdet-filter { font-size: .8rem !important; padding: 6px 9px !important; margin: 4px 0 6px; background: var(--surface) !important; }
+  .tdet-act { padding: 8px 0; border-top: 1px solid var(--border); }
+  .tdet-act:first-of-type { border-top: none; }
+  .tdet-when { display: flex; gap: 8px; align-items: baseline; font-size: .74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .tdet-when .d { font-weight: 600; color: var(--fg); }
+  .tdet-when .m { margin-left: auto; font-family: var(--font-mono); color: var(--accent); }
+  .tdet-text { font-size: .86rem; white-space: pre-wrap; word-break: break-word; margin-top: 2px; }
+  .tdet-text mark { background: var(--warn-weak); color: inherit; border-radius: 3px; padding: 0 1px; }
+  .tdet-empty { font-size: .82rem; color: var(--muted); padding: 6px 0; }
+  .tdet-more { margin-top: 6px; }
+  .tag.task.link { cursor: pointer; font-family: inherit; font-size: .7rem; font-weight: 600; line-height: 1.5; }
+  .tag.task.link:hover { border-color: var(--accent); color: var(--accent); }
+  .proj-item.flash, li.flash { animation: flash 1.2s ease; border-radius: 8px; }
+  .tm-check { appearance: none; -webkit-appearance: none; width: 16px; height: 16px; border: 2px solid var(--border); border-radius: 5px; cursor: pointer; flex: none; position: relative; background: var(--surface); }
+  .tm-check:checked { background: var(--accent); border-color: var(--accent); }
+  .tm-check:checked::after { content: "✓"; color: #fff; font-size: .62rem; position: absolute; inset: 0; display: grid; place-items: center; }
+  .tm-name { flex: 1; min-width: 0; word-break: break-word; }
+  .tm-name.done { text-decoration: line-through; color: var(--muted); }
+  .tm-cust { font-size: .7rem; font-weight: 600; color: var(--muted); background: var(--surface-2); border: 1px solid transparent; border-radius: 999px; padding: 1px 8px; cursor: pointer; white-space: nowrap; font-family: inherit; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+  .tm-cust:hover { border-color: var(--accent); color: var(--accent); }
+  .tm-cust.empty { background: transparent; border: 1px dashed var(--border); font-weight: 400; }
+  .lbl .opt { text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .nt-note { flex-basis: 100%; font-size: .76rem; color: var(--muted); }
+  .nt-note:empty { display: none; }
+
+  /* to-do */
+  .todo-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+  .todo-head h2 { margin: 0; }
+  .todo-count { font-size: .74rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .todo-count.late { color: var(--danger); font-weight: 600; }
+  .todo-add { display: flex; gap: 8px; }
+  .todo-add input { flex: 1; min-width: 0; }
+  .todo-opts { display: flex; gap: 8px; margin: 8px 0 12px; flex-wrap: wrap; }
+  .todo-opts select, .todo-opts input { font-size: .82rem; padding: 7px 8px; }
+  .todo-opts #todo-assign, .td-edit .ed-assign { flex: 1 1 160px; min-width: 0; width: auto; }
+  .todo-opts #todo-due, .td-edit .ed-due { flex: 0 1 150px; width: auto; }
+  .todo-opts #todo-prio, .td-edit .ed-prio { flex: 0 0 auto; width: auto; }
+  .todo-tabs { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+  .todo-tab { font: inherit; font-size: .76rem; font-weight: 600; padding: 5px 11px; border-radius: 999px; background: var(--surface-2); color: var(--muted); border: 1px solid transparent; cursor: pointer; }
+  .todo-tab:hover { border-color: var(--border); color: var(--fg); }
+  .todo-tab.on { background: var(--accent); color: #fff; }
+  .todo-tab b { font-weight: 600; opacity: .75; margin-left: 3px; font-variant-numeric: tabular-nums; }
+  .todo-tab.late:not(.on) b { color: var(--danger); opacity: 1; }
+  .td { display: flex; align-items: center; gap: 9px; padding: 8px 0; border-top: 1px solid var(--border); font-size: .9rem; }
+  .td:first-child { border-top: none; }
+  .td .prio { width: 4px; align-self: stretch; border-radius: 3px; background: transparent; flex: none; }
+  .td .prio.p1 { background: var(--warn); } .td .prio.p2 { background: var(--danger); }
+  .td .nm { flex: 1; min-width: 0; word-break: break-word; cursor: text; }
+  .td.done .nm { text-decoration: line-through; color: var(--muted); }
+  .td .chips { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; max-width: 50%; }
+  .chip { font-size: .68rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .chip.due { background: var(--surface-2); color: var(--muted); }
+  .chip.late { background: var(--danger-weak); color: var(--danger); }
+  .chip.today { background: var(--warn-weak); color: var(--warn); }
+  .chip.proj { background: var(--accent-weak); color: var(--accent); }
+  .chip.cust { background: var(--surface-2); color: var(--muted); }
+  .to-act { font: inherit; font-size: .74rem; color: var(--accent); border: 1px solid var(--border); background: var(--surface); border-radius: 7px; padding: 3px 8px; white-space: nowrap; cursor: pointer; }
+  .to-act:hover { border-color: var(--accent); background: var(--accent-weak); }
+  .td .icon-btn { flex: none; }
+  .td .icon-btn.edit:hover { color: var(--accent); background: var(--accent-weak); }
+  .td-edit { padding: 10px; background: var(--surface-2); border-radius: 10px; margin: 6px 0; display: flex; flex-direction: column; gap: 8px; }
+  .td-edit .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .td-edit input, .td-edit select { font-size: .85rem; padding: 7px 8px; background: var(--surface); }
+  .td-edit .acts { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  .todo-foot { font-size: .78rem; color: var(--muted); margin-top: 10px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .linkbtn { font: inherit; font-size: .78rem; color: var(--muted); background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+  .linkbtn:hover { color: var(--fg); }
+  .todo-done-list { margin-top: 6px; }
+  .todo-empty { color: var(--muted); font-size: .86rem; text-align: center; padding: 14px 6px; }
+  .flash { animation: flash 1.2s ease; }
+  @keyframes flash { 0% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: var(--shadow); } }
+  @media (prefers-reduced-motion: reduce) { .flash { animation: none; } }
+
+  /* overview */
+  .summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+  .stat { background: var(--surface-2); border-radius: 11px; padding: 13px 15px; }
+  .stat .k { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+  .stat .v { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 500; font-variant-numeric: tabular-nums; margin-top: 3px; }
+  .stat .s { font-size: .72rem; color: var(--muted); margin-top: 2px; min-height: 1.1em; font-variant-numeric: tabular-nums; }
+  .stat.total { background: var(--accent-weak); }
+  .meter { height: 4px; border-radius: 3px; background: var(--border); margin-top: 7px; overflow: hidden; }
+  .meter i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 3px; transition: width .3s ease; }
+  .meter.low i { background: var(--warn); } .meter.over i { background: var(--danger); }
+  .stat.total .meter { background: var(--surface); }
+  .s .lowtxt { color: var(--warn); } .s .overtxt { color: var(--danger); }
+  .s span { white-space: nowrap; }
+  .bar { position: relative; overflow: hidden; }
+  .bar .logged { position: absolute; left: 0; right: 0; bottom: 0; background: var(--accent); }
+  .day.has .bar { background: var(--accent-weak); box-shadow: inset 0 0 0 1px var(--accent); }
+  .day.today.has .bar { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 2px var(--accent-weak); }
+  .bar .logged.over { background: var(--danger); }
+  .week-legend { display: flex; gap: 14px; justify-content: flex-end; font-size: .68rem; color: var(--muted); margin-top: 6px; }
+  .week-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .week-legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .week-legend .lg-log { background: var(--accent); }
+  .week-legend .lg-work { background: var(--accent-weak); box-shadow: inset 0 0 0 1px var(--accent); }
+  .hist td.lgd { min-width: 64px; }
+  .hist td.lgd .lgv { display: flex; justify-content: flex-end; align-items: baseline; gap: 5px; }
+  .hist td.lgd small { font-family: var(--font-body); font-size: .66rem; color: var(--accent); font-weight: 600; }
+  .hist td.lgd small.low { color: var(--warn); } .hist td.lgd small.over { color: var(--danger); }
+  .hist td.lgd .meter { margin-top: 3px; height: 3px; }
+  .att-logged { color: var(--accent) !important; font-weight: 600; }
+  .att-logged.low { color: var(--warn) !important; }
+  .stat.total .k { color: var(--accent); }
+  .tw-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .tw-head h2 { margin: 0; }
+  .mnav { display: flex; align-items: center; gap: 6px; }
+  .mnav .mini { width: 34px; height: 34px; font-size: 1rem; }
+  .m-label { font-weight: 600; font-size: .92rem; min-width: 118px; text-align: center; }
+  .mnav #m-now[hidden] { display: none; }
+  #tw-card.past .stat.cur-only { display: none; }
+  .month-chart { display: grid; gap: 3px; align-items: end; height: 120px; }
+  .mday { display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; justify-content: flex-end; min-width: 0; cursor: pointer; }
+  .mday .bar-track { width: 100%; flex: 1; display: flex; align-items: flex-end; }
+  .mday .bar { border-radius: 3px 3px 1px 1px; }
+  .mday:not(.has) .bar { background: var(--border); }
+  .mday.has .bar { background: var(--accent-weak); box-shadow: inset 0 0 0 1px var(--accent); }
+  .mday .dn { font-size: .58rem; color: var(--muted); font-variant-numeric: tabular-nums; line-height: 1; }
+  .mday.we .dn { opacity: .55; }
+  .mday.today .dn { color: var(--accent); font-weight: 700; }
+  .mday.today .bar { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 2px var(--accent-weak); }
+  .mday.sel .dn { color: var(--fg); font-weight: 700; }
+  .mday:hover .bar { filter: brightness(.95); }
+  .week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; align-items: end; height: 110px; }
+  .day { display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
+  .bar-track { width: 100%; flex: 1; display: flex; align-items: flex-end; }
+  .bar { width: 100%; background: var(--accent); border-radius: 5px 5px 2px 2px; min-height: 3px; transition: height .3s ease; }
+  .day.today .bar { box-shadow: 0 0 0 2px var(--accent-weak); }
+  .day:not(.has) .bar { background: var(--border); }
+  .day .lbl { font-size: .72rem; color: var(--muted); font-weight: 600; }
+  .day .hrs { font-family: var(--font-mono); font-size: .64rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .day.today .lbl { color: var(--accent); }
+  @media (prefers-reduced-motion: reduce) { .bar { transition: none; } }
+  .pstat { padding: 9px 0; border-top: 1px solid var(--border); } .pstat:first-child { border-top: none; }
+  .pstat-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .pstat-nm { font-weight: 600; font-size: .9rem; min-width: 0; word-break: break-word; }
+  .pstat-nm small { color: var(--muted); font-weight: 400; }
+  .pstat-v { font-family: var(--font-mono); font-size: .88rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .pstat-meter { height: 5px; border-radius: 4px; background: var(--surface-2); margin-top: 6px; overflow: hidden; }
+  .pstat-meter span { display: block; height: 100%; background: var(--accent); }
+
+  .empty { color: var(--muted); font-size: .9rem; text-align: center; padding: 16px 10px; line-height: 1.6; }
+  .foot { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; align-items: center; padding-top: 4px; }
+  .foot .note { color: var(--muted); font-size: .76rem; flex-basis: 100%; text-align: center; }
+  .foot button { background: var(--surface); border: 1px solid var(--border); color: var(--muted); font: inherit; font-size: .78rem; cursor: pointer; padding: 7px 13px; border-radius: 8px; }
+  .foot button:hover { color: var(--fg); border-color: var(--muted); }
+</style>
+
+<div class="wrap">
+  <div class="topbar">
+    <div class="brand"><h1>Pracovný denník</h1><span class="sub" id="today-date"></span></div>
+    <button class="theme-btn" id="theme-toggle" type="button">Téma</button>
+  </div>
+
+  <!-- command bar -->
+  <section class="card cmdbar">
+    <div class="now">
+      <div class="now-clock" id="now-clock">--:--:--</div>
+      <div class="now-date"><span class="live-tag"><span class="dot"></span>Živý čas z Windowsu</span> · <span id="now-date"></span></div>
+    </div>
+    <div class="presence">
+      <span class="status-pill"><span class="dot"></span><span id="status-text">Mimo práce</span></span>
+      <div class="today-presence">Dnes v práci: <strong id="today-presence">0h 00m</strong></div>
+    </div>
+    <div class="controls" id="controls"></div>
+  </section>
+
+  <!-- attendance -->
+  <section class="card">
+    <div class="att-head">
+      <h2>Dochádzka</h2>
+      <div class="att-date">
+        <button class="mini" id="att-prev" type="button" title="Predchádzajúci deň" aria-label="Predchádzajúci deň">‹</button>
+        <input type="date" id="att-date" aria-label="Deň dochádzky">
+        <button class="mini" id="att-next" type="button" title="Nasledujúci deň" aria-label="Nasledujúci deň">›</button>
+        <button class="mini danger" id="att-del" type="button" title="Vymazať tento deň" aria-label="Vymazať tento deň">🗑</button>
+      </div>
+    </div>
+    <div class="att-body">
+      <div class="seg-wrap">
+        <div id="att-segs"></div>
+        <button class="btn btn-ghost btn-sm seg-add" id="att-add-seg" type="button">+ pridať úsek</button>
+      </div>
+      <div class="att-tile total"><span class="k">Odpracované</span><span class="v" id="att-worked">0h 00m</span><span class="sub2" id="att-break">prestávky 0h 00m</span><span class="sub2" id="att-span"></span><span class="sub2 att-logged" id="att-logged"></span></div>
+    </div>
+    <div class="att-hint" id="att-hint">Časy sa vyplnia tlačidlami hore, alebo ich prepíš ručne. Odpracovaný čas = koniec − príchod − prestávka.</div>
+  </section>
+
+  <div class="dash">
+    <div class="col">
+      <!-- write activity -->
+      <section class="card">
+        <h2>Zapísať, čo robím</h2>
+        <div class="stack">
+          <div>
+            <label class="lbl" for="sel-project">Projekt</label>
+            <div class="pick">
+              <div class="field"><select id="sel-project"></select></div>
+              <button class="mini" id="btn-new-project" type="button" title="Nový projekt" aria-label="Nový projekt">+</button>
+            </div>
+          </div>
+
+          <div class="inline-add" id="add-project">
+            <div class="field"><label class="lbl" for="np-name">Názov projektu</label><input type="text" id="np-name" placeholder="napr. Infraštruktúra" autocomplete="off"></div>
+            <div class="field"><label class="lbl" for="np-cust">Zákazník</label><input type="text" id="np-cust" list="cust-list" placeholder="napr. Žilinská univerzita" autocomplete="off"></div>
+            <button class="btn btn-primary" id="np-save" type="button">Pridať projekt</button>
+            <datalist id="cust-list"></datalist>
+          </div>
+
+          <div>
+            <label class="lbl" for="sel-task">Úloha</label>
+            <div class="pick">
+              <div class="field"><select id="sel-task"></select></div>
+              <button class="mini" id="btn-new-task" type="button" title="Nová úloha" aria-label="Nová úloha">+</button>
+              <button class="mini danger" id="btn-del-task" type="button" title="Zmazať vybranú úlohu" aria-label="Zmazať úlohu">🗑</button>
+            </div>
+          </div>
+
+          <div class="inline-add" id="add-task">
+            <div class="field"><label class="lbl" for="nt-name">Názov úlohy</label><input type="text" id="nt-name" placeholder="napr. Migrácia VM" autocomplete="off"></div>
+            <div class="field" id="nt-cust-field"><label class="lbl" for="nt-cust">Zákazník <span class="opt">(nepovinné)</span></label><input type="text" id="nt-cust" list="cust-list" placeholder="napr. Žilinská univerzita" autocomplete="off"></div>
+            <button class="btn btn-primary" id="nt-save" type="button">Pridať úlohu</button>
+            <div class="nt-note" id="nt-note"></div>
+          </div>
+
+          <div>
+            <label class="lbl">Kedy</label>
+            <div class="time-row">
+              <div class="f-date"><input type="date" id="act-date"></div>
+              <div class="f-time"><span class="t-sep">od</span><input type="time" id="act-from"></div>
+              <div class="f-time"><span class="t-sep">do</span><input type="time" id="act-to"></div>
+            </div>
+            <div class="act-span" id="act-span"></div>
+          </div>
+          <div>
+            <label class="lbl" for="act-text">Čo si robil / robíš</label>
+            <textarea id="act-text" rows="4" placeholder="napr.&#10;– nasadil monitoring na srv01&#10;– vyriešil ticket #42&#10;– porada s dodávateľom"></textarea>
+            <div class="write-row" style="justify-content: space-between; margin-top: 8px; align-items: center;">
+              <div class="hint" id="write-hint" style="margin-top:0">Enter = nový riadok · Ctrl+Enter = zapísať. Cez polnoc: dátum = deň začiatku, napr. od 23:00 do 01:30.</div>
+              <button class="btn btn-primary" id="act-save" type="button">Zapísať</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- activity log -->
+      <section class="card">
+        <h2>Posledné aktivity</h2>
+        <div id="log"></div>
+      </section>
+    </div>
+
+    <div class="col">
+      <!-- to-do -->
+      <section class="card" id="todo-card">
+        <div class="todo-head"><h2>To-do</h2><span class="todo-count" id="todo-count"></span></div>
+        <div class="todo-add">
+          <input type="text" id="todo-text" placeholder="Nové to-do… (Enter)" autocomplete="off" aria-label="Nové to-do">
+          <button class="btn btn-primary btn-sm" id="todo-add" type="button">Pridať</button>
+        </div>
+        <div class="todo-opts">
+          <select id="todo-assign" aria-label="Projekt alebo zákazník"></select>
+          <input type="date" id="todo-due" aria-label="Termín" title="Termín (nepovinné)">
+          <select id="todo-prio" aria-label="Priorita"><option value="0">Bežná</option><option value="1">Stredná</option><option value="2">Vysoká</option></select>
+        </div>
+        <div class="todo-tabs" id="todo-tabs" role="tablist"></div>
+        <div id="todo-list"></div>
+        <div class="todo-foot" id="todo-foot"></div>
+      </section>
+      <!-- projects manager -->
+      <section class="card">
+        <h2>Projekty a úlohy</h2>
+        <div id="proj-manager"></div>
+      </section>
+      <!-- time at work -->
+      <section class="card" id="tw-card">
+        <div class="tw-head">
+          <h2>Čas v práci</h2>
+          <div class="mnav">
+            <button class="mini" id="m-prev" type="button" title="Predchádzajúci mesiac" aria-label="Predchádzajúci mesiac">‹</button>
+            <span class="m-label" id="m-label" aria-live="polite"></span>
+            <button class="mini" id="m-next" type="button" title="Nasledujúci mesiac" aria-label="Nasledujúci mesiac">›</button>
+            <button class="btn btn-ghost btn-sm" id="m-now" type="button">Tento mesiac</button>
+          </div>
+        </div>
+        <div class="summary-grid">
+          <div class="stat"><div class="k" id="stat-month-k">V práci</div><div class="v" id="stat-month">0h 00m</div><div class="s" id="stat-month-s"></div></div>
+          <div class="stat total"><div class="k" id="stat-total-k">Odpísané v aktivitách</div><div class="v" id="stat-total">0h 00m</div><div class="s" id="stat-total-s"></div><div class="meter" id="stat-total-m"><i></i></div></div>
+          <div class="stat cur-only"><div class="k">Dnes</div><div class="v" id="stat-today">0h 00m</div><div class="s" id="stat-today-s"></div><div class="meter" id="stat-today-m"><i></i></div></div>
+          <div class="stat cur-only"><div class="k">Tento týždeň</div><div class="v" id="stat-week">0h 00m</div><div class="s" id="stat-week-s"></div><div class="meter" id="stat-week-m"><i></i></div></div>
+        </div>
+        <div class="month-chart" id="month-chart"></div>
+        <div class="week-legend"><span><i class="lg-log"></i>odpísané v aktivitách</span><span><i class="lg-work"></i>v práci</span></div>
+        <div class="hist-bar">
+          <span class="hist-title" id="hist-title">Dni v mesiaci · klikni na deň a uprav</span>
+          <div class="hist-add">
+            <button class="btn btn-ghost btn-sm" id="m-csv" type="button" title="Stiahnuť dochádzku a odpísané hodiny za zobrazený mesiac">CSV za mesiac</button>
+            <input type="date" id="hist-new-date" aria-label="Dátum na pridanie">
+            <button class="btn btn-ghost btn-sm" id="hist-add-btn" type="button">+ Pridať deň</button>
+          </div>
+        </div>
+        <div class="hist-wrap">
+          <table class="hist">
+            <thead><tr><th>Deň</th><th>Príchod</th><th>Odchod</th><th class="num">Prest.</th><th class="num">V práci</th><th class="num">Odpísané</th><th class="act"></th></tr></thead>
+            <tbody id="hist-body"></tbody>
+          </table>
+        </div>
+      </section>
+      <!-- activity by project -->
+      <section class="card">
+        <h2>Aktivity podľa projektu</h2>
+        <div id="project-stats"></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span class="note">Dáta sú uložené v tomto prehliadači. Pre istotu si občas sprav zálohu.</span>
+    <button id="export-json" type="button">Exportovať zálohu (JSON)</button>
+    <button id="import-json" type="button">Importovať zálohu</button>
+    <button id="download-csv" type="button">Stiahnuť CSV</button>
+    <button id="copy-csv" type="button">Kopírovať CSV</button>
+    <button id="download-att-csv" type="button">Stiahnuť dochádzku (CSV)</button>
+    <input type="file" id="import-file" accept="application/json,.json" hidden>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var KEY = "pracovny_dennik_v3";
+  var THEME_KEY = "pracovny_dennik_theme";
+  var DAY_NAMES = ["Po","Ut","St","Št","Pi","So","Ne"];
+  var MON = ["január","február","marec","apríl","máj","jún","júl","august","september","október","november","december"];
+
+  var state = load();
+  var selProject = "";   // project id, "" = bez projektu
+  var selTask = "";      // task id
+
+  function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
+
+  function blankState() {
+    var pid = uid(), tid = uid(), now = Date.now();
+    return {
+      presence: { status: "out", since: null, segments: [] },
+      projects: [ { id: pid, name: "Infraštruktúra", customer: "Žilinská univerzita" } ],
+      tasks: [ { id: tid, name: "Príklad: prevzatie serverov", projectId: pid, customer: "", done: false } ],
+      activities: [ { id: uid(), ts: now, taskId: tid, text: "Ukážková aktivita — projekt aj úlohu môžeš zmazať.", minutes: null } ]
+    };
+  }
+  function load() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (raw) {
+        var s = JSON.parse(raw);
+        s.presence = s.presence || { status: "out", since: null, segments: [] };
+        s.presence.segments = s.presence.segments || [];
+        s.projects = s.projects || []; s.tasks = s.tasks || []; s.activities = s.activities || [];
+        return normalize(s);
+      }
+      return normalize(migrateV2() || blankState());
+    } catch (e) { return normalize(blankState()); }
+  }
+  // attendance: { "YYYY-MM-DD": { segs: [{ in: "HH:MM", out: "HH:MM"|null }], done: bool } }
+  // (older format { arrival, breakStart, breakEnd, departure } is converted on load)
+  function toSegRec(r) {
+    if (!r || typeof r !== "object") return null;
+    if (Array.isArray(r.segs)) { r.segs = r.segs.filter(function (x) { return x && (x.in || x.out); }).map(function (x) { return { in: x.in || null, out: x.out || null }; }); r.done = !!r.done; return r.segs.length ? r : null; }
+    if (!r.arrival) return null;
+    var segs = [], done;
+    if (r.breakStart) {
+      segs.push({ in: r.arrival, out: r.breakStart });
+      if (r.breakEnd) { segs.push({ in: r.breakEnd, out: r.departure || null }); done = !!r.departure; }
+      else done = !!r.departure;
+    } else { segs.push({ in: r.arrival, out: r.departure || null }); done = !!r.departure; }
+    return { segs: segs, done: done };
+  }
+  function normalize(s) {
+    s.presence = s.presence || { status: "out", since: null, segments: [] };
+    s.presence.segments = s.presence.segments || [];
+    if (!s.attendance || typeof s.attendance !== "object") s.attendance = migrateSegments(s.presence);
+    Object.keys(s.attendance).forEach(function (k) { var r = toSegRec(s.attendance[k]); if (r) s.attendance[k] = r; else delete s.attendance[k]; });
+    if (!Array.isArray(s.todos)) s.todos = [];   // { id, text, projectId, customer, due, prio, done, doneAt, createdAt }
+    return s;
+  }
+  function migrateSegments(p) {
+    var att = {}, byDay = {};
+    function hm(ts) { var d = new Date(ts); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); }
+    function dk(ts) { var d = new Date(ts); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+    (p.segments || []).forEach(function (sg) { (byDay[dk(sg.start)] = byDay[dk(sg.start)] || []).push(sg); });
+    var todayK = dk(Date.now());
+    Object.keys(byDay).forEach(function (k) {
+      var sg = byDay[k].sort(function (a, b) { return a.start - b.start; });
+      var r = { arrival: hm(sg[0].start), breakStart: null, breakEnd: null, departure: hm(sg[sg.length - 1].end) };
+      if (sg.length >= 2) { r.breakStart = hm(sg[0].end); r.breakEnd = hm(sg[1].start); }
+      att[k] = r;
+    });
+    if (p.status === "in" && p.since && dk(p.since) === todayK) {
+      var r = att[todayK];
+      if (!r) att[todayK] = { arrival: hm(p.since), breakStart: null, breakEnd: null, departure: null };
+      else { if (!r.breakStart) { r.breakStart = r.departure; r.breakEnd = hm(p.since); } r.departure = null; }
+    } else if (p.status === "break" && att[todayK]) {
+      var r2 = att[todayK]; if (!r2.breakStart) { r2.breakStart = r2.departure; r2.breakEnd = null; } r2.departure = null;
+    }
+    return att;
+  }
+  function migrateV2() {
+    try {
+      var raw = localStorage.getItem("pracovny_dennik_v2"); if (!raw) return null;
+      var o = JSON.parse(raw);
+      var projects = [], tasks = [], activities = [];
+      function findProject(name, cust) {
+        return projects.filter(function (p) { return p.name === name && p.customer === cust; })[0];
+      }
+      (o.tasks || []).forEach(function (t) {
+        var projectId = null, cust = (t.customer || "").trim(), proj = (t.project || "").trim();
+        if (proj) { var p = findProject(proj, cust); if (!p) { p = { id: uid(), name: proj, customer: cust }; projects.push(p); } projectId = p.id; }
+        var task = { id: t.id || uid(), name: t.name, projectId: projectId, customer: projectId ? "" : cust, done: !!t.done };
+        tasks.push(task);
+        (t.activities || []).forEach(function (a) { activities.push({ id: a.id || uid(), ts: a.ts, taskId: task.id, text: a.text, minutes: (typeof a.minutes === "number" ? a.minutes : null) }); });
+      });
+      var presence = { status: "out", since: null, segments: (o.presence && o.presence.segments) || [] };
+      return { presence: presence, projects: projects, tasks: tasks, activities: activities };
+    } catch (e) { return null; }
+  }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+
+  // lookups
+  function projectById(id) { return state.projects.filter(function (p) { return p.id === id; })[0] || null; }
+  function taskById(id) { return state.tasks.filter(function (t) { return t.id === id; })[0] || null; }
+  function custOfTask(t) { if (!t) return ""; if (t.projectId) { var p = projectById(t.projectId); return p ? p.customer : ""; } return t.customer || ""; }
+  function projNameOfTask(t) { if (!t || !t.projectId) return ""; var p = projectById(t.projectId); return p ? p.name : ""; }
+  function tasksOfProject(pid) { return state.tasks.filter(function (t) { return (pid ? t.projectId === pid : !t.projectId); }); }
+
+  // time helpers
+  function two(n) { return String(n).padStart(2, "0"); }
+  function fmtDur(ms) { var m = Math.round(ms / 60000); var h = Math.floor(m / 60); m -= h * 60; return h + "h " + two(m) + "m"; }
+  function fmtDurShort(ms) { var m = Math.round(ms / 60000); var h = Math.floor(m / 60); m -= h * 60; return h + "h" + two(m); }
+  function fmtTime(ts) { var d = new Date(ts); return two(d.getHours()) + ":" + two(d.getMinutes()); }
+  function dateKey(ts) { var d = new Date(ts); return d.getFullYear() + "-" + two(d.getMonth() + 1) + "-" + two(d.getDate()); }
+  function startOfWeek(now) { var d = new Date(now); d.setHours(0,0,0,0); var day = (d.getDay() + 6) % 7; d.setDate(d.getDate() - day); return d; }
+  function parseDate(s) { var p = s.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  function withTime(d, hm) { var p = hm.split(":"); var x = new Date(d); x.setHours(+p[0], +p[1], 0, 0); return x.getTime(); }
+  function plural(n, one, few, many) { if (n === 1) return one; if (n >= 2 && n <= 4) return few; return many; }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+  // ---- attendance: a day = several work segments (úseky) ----
+  // A shift is stored under the day it STARTED. Times are "HH:MM"; a time earlier than the previous
+  // one in the sequence (in1 → out1 → in2 → out2 …) is read as the next day, so Fri 18:00 → Sat 02:00 works.
+  // Gaps between segments are breaks. `done` = the person clocked out for the day.
+  var MAX_SHIFT_MIN = 24 * 60;          // first arrival → last departure can't span more than 24 h
+  var OPEN_SHIFT_MIN = 20 * 60;         // an un-finished day from yesterday stays "active" this long
+  function nowHM() { var d = new Date(); return two(d.getHours()) + ":" + two(d.getMinutes()); }
+  function hmToMin(hm) { if (!hm) return null; var p = hm.split(":"); return +p[0] * 60 + +p[1]; }
+  function rec(k) { var r = state.attendance[k]; return r && r.segs && r.segs.length ? r : null; }
+  function recOrNew(k) { var r = state.attendance[k]; if (!r || !Array.isArray(r.segs)) r = state.attendance[k] = { segs: [], done: false }; return r; }
+  function cleanRec(k) { var r = state.attendance[k]; if (!r) return; r.segs = (r.segs || []).filter(function (x) { return x.in || x.out; }); if (!r.segs.length) delete state.attendance[k]; }
+  function prevDayKey(k) { var d = parseDate(k); d.setDate(d.getDate() - 1); return dateKey(d.getTime()); }
+  function minSinceDay(k, ts) { return ((ts == null ? Date.now() : ts) - parseDate(k).getTime()) / 60000; }
+  function lastSeg(r) { return r && r.segs.length ? r.segs[r.segs.length - 1] : null; }
+  // unwrap all segment times into minutes from the start day's midnight (can exceed 1440 = next day)
+  function unwrapSegs(r) {
+    var prev = null;
+    return (r && r.segs || []).map(function (sg) {
+      var o = {};
+      ["in", "out"].forEach(function (f) {
+        var m = hmToMin(sg[f]); if (m == null) { o[f] = null; return; }
+        if (prev != null) while (m < prev) m += 1440;
+        o[f] = m; prev = m;
+      });
+      return o;
+    });
+  }
+  function firstIn(r) { var u = unwrapSegs(r); for (var i = 0; i < u.length; i++) if (u[i].in != null) return u[i].in; return null; }
+  function activeKey() {
+    var t = dateKey(Date.now());
+    if (rec(t)) return t;
+    var y = prevDayKey(t), ry = rec(y);
+    if (ry && !ry.done && firstIn(ry) != null && minSinceDay(y) - firstIn(ry) < OPEN_SHIFT_MIN) return y;
+    return t;
+  }
+  var attDate = activeKey();   // day shown in the attendance card
+  // { work, brk, open, first, last, count, breakRunning } – minutes
+  function calcRec(k, r) {
+    var out = { work: 0, brk: 0, open: false, first: null, last: null, count: 0, breakRunning: false };
+    if (!r || !r.segs.length) return out;
+    var u = unwrapSegs(r), live = k === activeKey() && !r.done, now = minSinceDay(k), prevOut = null;
+    u.forEach(function (sg, i) {
+      if (sg.in == null) return;
+      out.count++;
+      if (out.first == null) out.first = sg.in;
+      if (prevOut != null && sg.in > prevOut) out.brk += sg.in - prevOut;
+      var end = sg.out != null ? sg.out : (live && i === u.length - 1 ? Math.max(now, sg.in) : null);
+      if (end != null) { out.work += end - sg.in; out.last = end; prevOut = end; }
+      else prevOut = null;
+    });
+    var ls = u[u.length - 1];
+    if (live && ls && ls.out != null) { out.breakRunning = true; if (now > ls.out) out.brk += now - ls.out; }
+    out.open = live;
+    return out;
+  }
+  function dayCalc(k) { return calcRec(k, rec(k)); }
+  function statusOf(k) {
+    var r = rec(k);
+    if (!r) return "out";
+    if (r.done) return "done";
+    var ls = lastSeg(r);
+    return ls && ls.in && !ls.out ? "in" : "break";
+  }
+  function todayMs() { return dayCalc(activeKey()).work * 60000; }
+  function afterStamp(k) {
+    attDate = k; histEdit = null; try { document.getElementById("act-date").value = k; } catch (e) {}
+    save(); renderPresence(); renderAttendance(); renderOverview(); renderHistory();
+  }
+  function clockIn() {            // first arrival of the day, or back from a break / after leaving
+    var ak = activeKey(), st = statusOf(ak);
+    var k = (st === "break" || st === "done") ? ak : dateKey(Date.now());
+    var r = recOrNew(k); r.segs.push({ in: nowHM(), out: null }); r.done = false; afterStamp(k);
+  }
+  function closeSeg(done) {
+    var k = activeKey(), r = recOrNew(k), ls = lastSeg(r);
+    if (ls && ls.in && !ls.out) ls.out = nowHM();
+    if (done) r.done = true;
+    afterStamp(k);
+  }
+  function startBreak() { closeSeg(false); }
+  function clockOut() { closeSeg(true); }
+  function undoOut() {            // "I didn't actually leave": re-open the last segment
+    var k = activeKey(), r = rec(k); if (!r) return;
+    var ls = lastSeg(r); if (ls) ls.out = null; r.done = false; afterStamp(k);
+  }
+
+  var lastActive = null;
+  function renderNow() {
+    var d = new Date();
+    document.getElementById("now-clock").textContent = two(d.getHours()) + ":" + two(d.getMinutes()) + ":" + two(d.getSeconds());
+    document.getElementById("now-date").textContent = DAY_NAMES[(d.getDay() + 6) % 7] + " " + d.getDate() + ". " + MON[d.getMonth()] + " " + d.getFullYear();
+    var k = activeKey(), st = statusOf(k);
+    var sig = k + "|" + dateKey(d.getTime());
+    if (sig !== lastActive) { lastActive = sig; renderPresence(); renderTodos(); }   // midnight / overnight-shift timeout
+    if (st === "in" || st === "break") {
+      document.getElementById("today-presence").textContent = fmtDur(todayMs());
+      if (d.getSeconds() === 0) { renderOverview(); if (attDate === k) renderAttendance(true); }
+      else if (attDate === k) renderAttTotals();
+    }
+  }
+  function renderPresence() {
+    var k = activeKey(), st = statusOf(k), r = rec(k), overnight = k !== dateKey(Date.now());
+    var c0 = dayCalc(k);
+    document.body.setAttribute("data-status", st);
+    document.getElementById("status-text").textContent = { out: "Mimo práce", in: "V práci", break: "Prestávka", done: "Po práci" }[st] + (overnight ? " · zmena od " + dayLabel(k) : "") + (c0.count > 1 && (st === "in" || st === "break") ? " · úsek " + c0.count : "");
+    document.getElementById("today-presence").textContent = fmtDur(todayMs());
+    var c = document.getElementById("controls"); c.innerHTML = "";
+    if (st === "out") c.appendChild(mkBtn("Pipnúť príchod", "btn-primary", clockIn));
+    else if (st === "in") { c.appendChild(mkBtn("Prestávka", "btn-warn", startBreak)); c.appendChild(mkBtn("Pipnúť odchod", "btn-stop", clockOut)); }
+    else if (st === "break") { c.appendChild(mkBtn("Koniec prestávky", "btn-primary", clockIn)); c.appendChild(mkBtn("Pipnúť odchod", "btn-stop", clockOut)); }
+    else { c.appendChild(mkBtn("Pipnúť znova príchod", "btn-primary", clockIn)); c.appendChild(mkBtn("Zrušiť odchod", "btn-ghost", undoOut)); }
+  }
+
+  function attHint(msg, warn) { var h = document.getElementById("att-hint"); h.textContent = msg; h.className = "att-hint" + (warn ? " warn" : ""); }
+  function validateRec(r) {
+    if (!r || !r.segs) return "";
+    var segs = r.segs;
+    for (var i = 0; i < segs.length; i++) {
+      if (!segs[i].in && segs[i].out) return "Pozor: úsek " + (i + 1) + " nemá čas príchodu.";
+      if (segs[i].in && !segs[i].out && i < segs.length - 1 && segs.slice(i + 1).some(function (x) { return x.in; })) return "Pozor: úsek " + (i + 1) + " nemá čas odchodu (nechať prázdny môže len posledný úsek).";
+    }
+    var u = unwrapSegs(r), first = null, last = null;
+    u.forEach(function (x) { [x.in, x.out].forEach(function (m) { if (m == null) return; if (first == null) first = m; last = m; }); });
+    if (first != null && last - first > MAX_SHIFT_MIN) return "Pozor: od prvého príchodu po posledný odchod by to bolo viac ako 24 h — skontroluj poradie časov.";
+    return "";
+  }
+  function segNextDay(u, i, f) { return u[i] && u[i][f] != null && u[i][f] >= 1440; }
+  // renders editable segment rows into host; segs is mutated in place, onChange() called after each edit
+  function renderSegRows(host, k, r, onChange, opts) {
+    opts = opts || {};
+    host.innerHTML = "";
+    host._dirty = false;
+    host._commit = onChange;
+    if (!host._wired) {
+      host._wired = true;
+      host.addEventListener("focusout", function (e) {
+        if (e.relatedTarget && host.contains(e.relatedTarget)) return;   // moving between fields of the same list
+        if (host._dirty) { host._dirty = false; host._commit(); }
+      });
+    }
+    var segs = r.segs, u = unwrapSegs(r);
+    var live = !opts.draft && k === activeKey() && !r.done, now = minSinceDay(k);
+    if (!segs.length) { var e = document.createElement("div"); e.className = "seg-empty"; e.textContent = opts.emptyText || "Žiadne úseky. Pipni príchod alebo pridaj úsek ručne."; host.appendChild(e); return; }
+    segs.forEach(function (sg, i) {
+      if (i > 0) {
+        var po = u[i - 1].out, pi = u[i].in;
+        if (po != null && pi != null) { var g = document.createElement("div"); g.className = "seg-gap"; g.textContent = "prestávka " + fmtDur(Math.max(0, pi - po) * 60000); host.appendChild(g); }
+      }
+      var isOpen = sg.in && !sg.out;
+      var row = document.createElement("div"); row.className = "seg-row" + (isOpen && live ? " open" : "");
+      var no = document.createElement("span"); no.className = "no"; no.textContent = "Úsek " + (i + 1); row.appendChild(no);
+      ["in", "out"].forEach(function (f, j) {
+        if (j === 1) { var d = document.createElement("span"); d.className = "dash"; d.textContent = "–"; row.appendChild(d); }
+        var lab = document.createElement("label"); lab.className = "tf" + (segNextDay(u, i, f) ? " next-day" : "");
+        lab.innerHTML = "<small>" + (f === "in" ? "Príchod" : "Odchod") + '<em class="nd-badge">+1 deň</em></small>';
+        var inp = document.createElement("input"); inp.type = "time"; inp.value = sg[f] || "";
+        inp.setAttribute("aria-label", "Úsek " + (i + 1) + " " + (f === "in" ? "príchod" : "odchod"));
+        // Chrome fires "change" on every digit of a time field; rebuilding the rows then would steal focus
+        // after the first digit. So only store the value here and re-render once focus leaves the list.
+        inp.addEventListener("change", function () { sg[f] = inp.value || null; host._dirty = true; });
+        inp.addEventListener("keydown", function (e) {
+          if (opts.onKey) { opts.onKey(e); return; }
+          if (e.key === "Enter") { e.preventDefault(); sg[f] = inp.value || null; host._dirty = false; inp.blur(); onChange(); }
+        });
+        lab.appendChild(inp); row.appendChild(lab);
+      });
+      var dur = document.createElement("span"); dur.className = "dur";
+      if (u[i].in != null && u[i].out != null) dur.textContent = fmtDur((u[i].out - u[i].in) * 60000);
+      else if (isOpen && live && i === segs.length - 1) { dur.textContent = fmtDur(Math.max(0, now - u[i].in) * 60000); dur.className += " run"; dur.title = "beží"; }
+      else dur.textContent = "—";
+      row.appendChild(dur);
+      var x = document.createElement("button"); x.type = "button"; x.className = "icon-btn"; x.textContent = "✕"; x.title = "Odstrániť úsek"; x.setAttribute("aria-label", "Odstrániť úsek " + (i + 1));
+      x.addEventListener("click", function () { segs.splice(i, 1); onChange(true); });
+      row.appendChild(x);
+      host.appendChild(row);
+    });
+    if (live && u.length && u[u.length - 1].out != null) {
+      var g2 = document.createElement("div"); g2.className = "seg-gap run"; g2.textContent = "prestávka beží · " + fmtDur(Math.max(0, now - u[u.length - 1].out) * 60000); host.appendChild(g2);
+    }
+  }
+  function spanText(k, c, r) {
+    if (c.first == null) return "";
+    var u = unwrapSegs(r), last = null; u.forEach(function (x) { if (x.out != null) last = x.out; });
+    function hm(m) { return two(Math.floor(m / 60) % 24) + ":" + two(Math.round(m % 60)); }
+    return c.count + " " + plural(c.count, "úsek", "úseky", "úsekov") + " · " + hm(c.first) + (last != null && !c.open ? "–" + hm(last) + (last >= 1440 ? " +1" : "") : " – teraz");
+  }
+  function renderAttTotals() {
+    var r = rec(attDate), c = dayCalc(attDate);
+    document.getElementById("att-worked").textContent = fmtDur(c.work * 60000);
+    document.getElementById("att-break").textContent = "prestávky " + fmtDur(c.brk * 60000) + (c.breakRunning ? " · beží" : "");
+    document.getElementById("att-span").textContent = r ? spanText(attDate, c, r) : "";
+    var lg = loggedByDay()[attDate] || 0, ri = ratioInfo(lg, c.work), el = document.getElementById("att-logged");
+    el.textContent = lg || c.work ? "odpísané v aktivitách " + fmtDur(lg * 60000) + (c.work ? " · " + ri.pct + " %" : "") : "";
+    el.className = "sub2 att-logged" + (ri.cls === "low" ? " low" : "");
+  }
+  function renderAttendance(keepFocus) {
+    var host = document.getElementById("att-segs");
+    if (keepFocus && host.contains(document.activeElement)) { renderAttTotals(); return; }
+    var adEl = document.getElementById("att-date"); if (document.activeElement !== adEl) adEl.value = attDate;
+    var r = state.attendance[attDate] && Array.isArray(state.attendance[attDate].segs) ? state.attendance[attDate] : { segs: [], done: false };
+    renderSegRows(host, attDate, r, function (structural) {
+      var rr = recOrNew(attDate); if (rr !== r) rr.segs = r.segs;
+      // manual edit: closing the last segment by hand counts as leaving for the day
+      var ls = lastSeg(rr); rr.done = !!(ls && ls.out);
+      cleanRec(attDate); histEdit = null; save(); afterAttChange();
+    });
+    renderAttTotals();
+    var v = validateRec(rec(attDate));
+    if (v) attHint(v, true);
+    else attHint(attDate === activeKey() ? "Každý príchod–odchod je jeden úsek, medzery medzi nimi sa rátajú ako prestávka. Časy môžeš prepísať ručne; po polnoci zadaj čas normálne (napr. 02:00)." : "Upravuješ deň " + prettyDate(attDate) + ". Zmeny sa ukladajú hneď.", false);
+  }
+  function addSegTo(k) {
+    var r = recOrNew(k), ls = lastSeg(r);
+    if (ls && ls.in && !ls.out && k === activeKey()) { attHint("Posledný úsek ešte beží — najprv doplň jeho odchod.", true); return; }
+    r.segs.push({ in: null, out: null });
+    attDate = k; renderAttendance();
+    var ins = document.querySelectorAll("#att-segs .seg-row:last-child input"); if (ins[0]) ins[0].focus();
+  }
+  function shiftAttDate(days) { var d = parseDate(attDate); d.setDate(d.getDate() + days); attDate = dateKey(d.getTime()); histEdit = null; renderAttendance(); renderHistory(); }
+  function mkBtn(label, cls, fn) { var b = document.createElement("button"); b.className = "btn " + cls; b.type = "button"; b.textContent = label; b.addEventListener("click", fn); return b; }
+
+  // ---- selectors ----
+  function renderProjectSelect() {
+    var sel = document.getElementById("sel-project");
+    sel.innerHTML = "";
+    var optNone = new Option("(bez projektu)", "");
+    sel.appendChild(optNone);
+    state.projects.slice().sort(function (a, b) { return a.name.localeCompare(b.name, "sk"); }).forEach(function (p) {
+      sel.appendChild(new Option(p.name + (p.customer ? " — " + p.customer : ""), p.id));
+    });
+    sel.value = selProject;
+    if (sel.value !== selProject) { selProject = ""; sel.value = ""; }
+  }
+  function renderTaskSelect() {
+    var sel = document.getElementById("sel-task");
+    sel.innerHTML = "";
+    var tasks = tasksOfProject(selProject).filter(function (t) { return !t.done; })
+      .sort(function (a, b) { return a.name.localeCompare(b.name, "sk"); });
+    if (!tasks.length) { sel.appendChild(new Option("— žiadna úloha, pridaj cez +", "")); }
+    else {
+      sel.appendChild(new Option("— vyber úlohu —", ""));
+      tasks.forEach(function (t) { sel.appendChild(new Option(t.name + (!t.projectId && t.customer ? " — " + t.customer : ""), t.id)); });
+    }
+    if (tasks.filter(function (t) { return t.id === selTask; }).length) sel.value = selTask;
+    else { selTask = ""; sel.value = ""; }
+  }
+
+  // ---- activity log ----
+  // ---- activity editing ----
+  var actEdit = null;   // id of the activity being edited (in the log or in a task's detail)
+  var actEditInDetail = false;
+  function fillTaskSelect(sel, currentId) {
+    sel.innerHTML = "";
+    var groups = state.projects.slice().sort(function (a, b) { return a.name.localeCompare(b.name, "sk"); })
+      .map(function (p) { return { label: p.name + (p.customer ? " — " + p.customer : ""), tasks: tasksOfProject(p.id) }; });
+    groups.push({ label: "Bez projektu", tasks: tasksOfProject(null) });
+    groups.forEach(function (g) {
+      var list = g.tasks.filter(function (t) { return !t.done || t.id === currentId; }).sort(function (a, b) { return a.name.localeCompare(b.name, "sk"); });
+      if (!list.length) return;
+      var og = document.createElement("optgroup"); og.label = g.label;
+      list.forEach(function (t) { og.appendChild(new Option(t.name + (!t.projectId && t.customer ? " — " + t.customer : "") + (t.done ? " (hotová)" : ""), t.id)); });
+      sel.appendChild(og);
+    });
+    sel.value = currentId || "";
+  }
+  function afterActChange() { save(); renderLog(); renderProjectManager(); renderOverview(); renderAttTotals(); }
+  function buildActEditor(a) {
+    var box = document.createElement("div"); box.className = "act-ed";
+    var sel = document.createElement("select"); sel.setAttribute("aria-label", "Úloha"); fillTaskSelect(sel, a.taskId);
+    var r1 = document.createElement("div"); r1.className = "row"; r1.appendChild(sel);
+    var r2 = document.createElement("div"); r2.className = "row";
+    var dIn = document.createElement("input"); dIn.type = "date"; dIn.className = "f-d"; dIn.value = dateKey(a.ts); dIn.setAttribute("aria-label", "Dátum");
+    function tf(lbl, v) { var w = document.createElement("div"); w.className = "f-t"; w.innerHTML = '<span class="t-sep">' + lbl + '</span>'; var i = document.createElement("input"); i.type = "time"; i.value = v; i.setAttribute("aria-label", "Čas " + lbl); w.appendChild(i); return { w: w, i: i }; }
+    var from = tf("od", fmtTime(a.ts)), to = tf("do", a.end ? fmtTime(a.end) : "");
+    r2.appendChild(dIn); r2.appendChild(from.w); r2.appendChild(to.w);
+    var span = document.createElement("div"); span.className = "span";
+    var ta = document.createElement("textarea"); ta.value = a.text || ""; ta.rows = Math.min(8, Math.max(3, (a.text || "").split("\n").length + 1)); ta.setAttribute("aria-label", "Text aktivity");
+    var acts = document.createElement("div"); acts.className = "acts";
+    acts.innerHTML = '<span class="kb">Ctrl+Enter uložiť · Esc zrušiť</span>';
+    function cancel() { actEdit = null; renderLog(); renderProjectManager(); }
+    function compute() {
+      var dv = dIn.value, fv = from.i.value, tv = to.i.value;
+      if (!dv) return { err: "Zadaj dátum." };
+      if (!fv && tv) return { err: "Zadaj aj čas „od“." };
+      var base = parseDate(dv);
+      var ts = withTime(base, fv || fmtTime(a.ts)), end = null, minutes = null, next = false;
+      if (fv && tv) { end = withTime(base, tv); if (end <= ts) { end += 86400000; next = true; } minutes = Math.round((end - ts) / 60000); }
+      return { ts: ts, end: end, minutes: minutes, next: next };
+    }
+    function preview() {
+      var c = compute();
+      if (c.err) { span.textContent = c.err; span.className = "span warn"; saveB.disabled = true; return; }
+      saveB.disabled = false; span.className = "span";
+      if (c.end) span.innerHTML = (c.next ? '<em class="nd-badge">+1 deň</em>' : '') + esc(fmtTime(c.ts) + " → " + fmtTime(c.end) + " · " + fmtDur(c.minutes * 60000));
+      else span.textContent = "Bez času „do“ — trvanie sa nepočíta.";
+    }
+    function saveIt() {
+      var c = compute(); if (c.err) { preview(); return; }
+      var text = ta.value.trim(); if (!text) { ta.focus(); return; }
+      if (!sel.value) { sel.focus(); return; }
+      a.taskId = sel.value; a.ts = c.ts; a.end = c.end; a.minutes = c.minutes; a.text = text;
+      actEdit = null; afterActChange();
+    }
+    var cancelB = mkBtn("Zrušiť", "btn-ghost btn-sm", cancel);
+    var saveB = mkBtn("Uložiť", "btn-primary btn-sm", saveIt);
+    acts.appendChild(cancelB); acts.appendChild(saveB);
+    [dIn, from.i, to.i].forEach(function (i) { i.addEventListener("input", preview); i.addEventListener("change", preview); });
+    [dIn, from.i, to.i, ta, sel].forEach(function (i) { i.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { e.preventDefault(); cancel(); }
+      else if (e.key === "Enter" && (e.ctrlKey || e.metaKey || i !== ta)) { e.preventDefault(); saveIt(); }
+    }); });
+    box.appendChild(r1); box.appendChild(r2); box.appendChild(span); box.appendChild(ta); box.appendChild(acts);
+    box.addEventListener("click", function (e) { e.stopPropagation(); });
+    preview();
+    setTimeout(function () { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 0);
+    return box;
+  }
+  function startActEdit(id) { actEdit = id; renderLog(); renderProjectManager(); }
+
+  function renderLog() {
+    var host = document.getElementById("log"); host.innerHTML = "";
+    if (!state.activities.length) { host.innerHTML = '<div class="empty">Zatiaľ žiadne aktivity. Vyber projekt a úlohu hore a napíš, čo robíš.</div>'; return; }
+    var byDay = {};
+    state.activities.forEach(function (a) { (byDay[dateKey(a.ts)] = byDay[dateKey(a.ts)] || []).push(a); });
+    Object.keys(byDay).sort().reverse().slice(0, 21).forEach(function (k) {
+      var items = byDay[k].slice().sort(function (a, b) { return b.ts - a.ts; });
+      var mins = items.reduce(function (n, a) { return n + (typeof a.minutes === "number" ? a.minutes : 0); }, 0);
+      var wrap = document.createElement("div"); wrap.className = "log-day";
+      var h = document.createElement("h3");
+      h.innerHTML = '<span>' + prettyDate(k) + '</span>' + (mins > 0 ? '<span class="d-total">' + mins + ' min</span>' : '');
+      wrap.appendChild(h);
+      items.forEach(function (a) {
+        if (a.id === actEdit && !actEditInDetail) { wrap.appendChild(buildActEditor(a)); return; }
+        var t = taskById(a.taskId);
+        var it = document.createElement("div"); it.className = "log-item";
+        var time = document.createElement("div"); time.className = "log-time"; time.textContent = a.end ? fmtTime(a.ts) + "–" + fmtTime(a.end) + (dateKey(a.end) !== dateKey(a.ts) ? " +1" : "") : fmtTime(a.ts);
+        var body = document.createElement("div"); body.className = "log-body";
+        var ctx = document.createElement("div"); ctx.className = "log-ctx";
+        var proj = projNameOfTask(t), cust = custOfTask(t);
+        if (proj) ctx.innerHTML += '<span class="tag proj">' + esc(proj) + '</span>';
+        if (cust) ctx.innerHTML += '<span class="tag cust">' + esc(cust) + '</span>';
+        if (t) {
+          var tt = document.createElement("button"); tt.type = "button"; tt.className = "tag task link"; tt.textContent = t.name; tt.title = "Zobraziť všetky aktivity tejto úlohy";
+          tt.addEventListener("click", function () { openTask(t.id); });
+          ctx.appendChild(tt);
+        } else ctx.innerHTML += '<span class="tag task">—</span>';
+        var txt = document.createElement("div"); txt.className = "log-text"; txt.textContent = a.text;
+        body.appendChild(ctx); body.appendChild(txt);
+        it.appendChild(time); it.appendChild(body);
+        if (typeof a.minutes === "number") { var mn = document.createElement("div"); mn.className = "log-min"; mn.textContent = a.minutes + "m"; it.appendChild(mn); }
+        var del = document.createElement("button"); del.className = "log-del"; del.type = "button"; del.innerHTML = "✕"; del.title = "Zmazať aktivitu"; del.setAttribute("aria-label", "Zmazať aktivitu");
+        del.addEventListener("click", function () {
+          if (!window.confirm("Zmazať túto aktivitu?")) return;
+          state.activities = state.activities.filter(function (x) { return x.id !== a.id; }); if (actEdit === a.id) actEdit = null; afterActChange();
+        });
+        var ed = document.createElement("button"); ed.className = "log-edit"; ed.type = "button"; ed.textContent = "✎"; ed.title = "Upraviť aktivitu"; ed.setAttribute("aria-label", "Upraviť aktivitu");
+        ed.addEventListener("click", function () { actEditInDetail = false; startActEdit(a.id); });
+        var la = document.createElement("div"); la.className = "log-acts"; la.appendChild(ed); la.appendChild(del);
+        it.appendChild(la);
+        wrap.appendChild(it);
+      });
+      host.appendChild(wrap);
+    });
+  }
+  function prettyDate(k) {
+    var p = k.split("-"); var d = new Date(+p[0], +p[1] - 1, +p[2]);
+    var today = dateKey(Date.now()), yest = dateKey(Date.now() - 86400000);
+    var pre = k === today ? "Dnes · " : (k === yest ? "Včera · " : "");
+    return pre + DAY_NAMES[(d.getDay() + 6) % 7] + " " + d.getDate() + ". " + MON[d.getMonth()];
+  }
+
+  // ---- task drill-down (rozkliknutie úlohy) ----
+  var openTasks = {}, taskShowAll = {}, taskFilter = {};
+  var TASK_PREVIEW = 8;
+  function actsOfTask(id) { return state.activities.filter(function (a) { return a.taskId === id; }).sort(function (a, b) { return b.ts - a.ts; }); }
+  function sumMin(list) { return list.reduce(function (n, a) { return n + (typeof a.minutes === "number" ? a.minutes : 0); }, 0); }
+  function shortDate(ts) { var d = new Date(ts); return DAY_NAMES[(d.getDay() + 6) % 7] + " " + d.getDate() + "." + (d.getMonth() + 1) + "." + (d.getFullYear() !== new Date().getFullYear() ? d.getFullYear() : ""); }
+  function highlight(text, q) {
+    if (!q) return esc(text);
+    var lo = text.toLowerCase(), ql = q.toLowerCase(), out = "", i = 0, j;
+    while ((j = lo.indexOf(ql, i)) >= 0) { out += esc(text.slice(i, j)) + "<mark>" + esc(text.slice(j, j + q.length)) + "</mark>"; i = j + q.length; }
+    return out + esc(text.slice(i));
+  }
+  function openTask(id) {
+    var t = taskById(id); if (!t) return;
+    openTasks[id] = true; renderProjectManager();
+    var li = document.querySelector('li[data-task="' + id + '"]');
+    if (li) { li.scrollIntoView({ behavior: "smooth", block: "center" }); li.classList.remove("flash"); void li.offsetWidth; li.classList.add("flash"); }
+  }
+  function buildTaskDetail(t) {
+    var li = document.createElement("li"); li.className = "task-detail";
+    var acts = actsOfTask(t.id), q = (taskFilter[t.id] || "").trim();
+    var head = document.createElement("div"); head.className = "tdet-head";
+    var sum = document.createElement("div"); sum.className = "tdet-sum";
+    if (acts.length) {
+      var mins = sumMin(acts);
+      sum.innerHTML = "<strong>" + acts.length + " " + plural(acts.length, "aktivita", "aktivity", "aktivít") + "</strong>" +
+        (mins ? " · " + fmtDur(mins * 60000) : "") + " · " + shortDate(acts[acts.length - 1].ts) + (acts.length > 1 ? " – " + shortDate(acts[0].ts) : "");
+    } else sum.textContent = "Zatiaľ žiadne aktivity.";
+    var addB = mkBtn("+ Zapísať k tejto úlohe", "btn-ghost btn-sm", function () {
+      selProject = t.projectId || ""; renderProjectSelect(); renderTaskSelect(); updateTaskForm();
+      if (t.done) { hint("Úloha je označená ako hotová — odškrtni ju, ak k nej chceš zapisovať.", true); return; }
+      selTask = t.id; renderTaskSelect();
+      var ta = document.getElementById("act-text"), card = ta.closest(".card");
+      card.scrollIntoView({ behavior: "smooth", block: "start" }); card.classList.remove("flash"); void card.offsetWidth; card.classList.add("flash");
+      hint("Úloha „" + t.name + "“ je vybraná. Napíš, čo si robil, a daj Zapísať (Ctrl+Enter).", false);
+      setTimeout(function () { ta.focus({ preventScroll: true }); }, 350);
+    });
+    head.appendChild(sum); head.appendChild(addB); li.appendChild(head);
+    if (acts.length > 4) {
+      var f = document.createElement("input"); f.type = "text"; f.className = "tdet-filter"; f.placeholder = "Hľadať v aktivitách tejto úlohy…"; f.value = taskFilter[t.id] || ""; f.setAttribute("aria-label", "Hľadať v aktivitách");
+      f.addEventListener("input", function () {
+        taskFilter[t.id] = f.value; var pos = f.selectionStart;
+        renderProjectManager();
+        var nf = document.querySelector('li[data-task="' + t.id + '"] + li.task-detail .tdet-filter'); if (nf) { nf.focus(); try { nf.setSelectionRange(pos, pos); } catch (e) {} }
+      });
+      li.appendChild(f);
+    }
+    var shown = q ? acts.filter(function (a) { return (a.text || "").toLowerCase().indexOf(q.toLowerCase()) >= 0; }) : acts;
+    if (q && !shown.length) { var e = document.createElement("div"); e.className = "tdet-empty"; e.textContent = "Nič nenájdené pre „" + q + "“."; li.appendChild(e); }
+    var lim = taskShowAll[t.id] || q ? shown.length : TASK_PREVIEW;
+    shown.slice(0, lim).forEach(function (a) {
+      if (a.id === actEdit && actEditInDetail) { li.appendChild(buildActEditor(a)); return; }
+      var row = document.createElement("div"); row.className = "tdet-act";
+      var when = '<span class="d">' + esc(shortDate(a.ts)) + '</span><span>' + (a.end ? fmtTime(a.ts) + "–" + fmtTime(a.end) + (dateKey(a.end) !== dateKey(a.ts) ? " +1" : "") : fmtTime(a.ts)) + '</span>' +
+        (typeof a.minutes === "number" ? '<span class="m">' + fmtDur(a.minutes * 60000) + '</span>' : '');
+      row.innerHTML = '<div class="tdet-when">' + when + '</div><div class="tdet-text">' + highlight(a.text || "", q) + '</div>';
+      var eb = document.createElement("button"); eb.type = "button"; eb.className = "log-edit"; eb.textContent = "✎"; eb.title = "Upraviť aktivitu"; eb.setAttribute("aria-label", "Upraviť aktivitu");
+      eb.addEventListener("click", function () { actEditInDetail = true; startActEdit(a.id); });
+      row.appendChild(eb);
+      li.appendChild(row);
+    });
+    if (shown.length > lim) {
+      var more = document.createElement("button"); more.type = "button"; more.className = "linkbtn tdet-more";
+      more.textContent = "Zobraziť všetky (" + shown.length + ")";
+      more.addEventListener("click", function () { taskShowAll[t.id] = true; renderProjectManager(); });
+      li.appendChild(more);
+    }
+    return li;
+  }
+
+  // ---- projects manager ----
+  function renderProjectManager() {
+    var host = document.getElementById("proj-manager"); host.innerHTML = "";
+    if (!state.projects.length && !tasksOfProject(null).length) {
+      host.innerHTML = '<div class="empty">Zatiaľ žiadne projekty. Pridaj prvý tlačidlom + pri poli Projekt.</div>'; return;
+    }
+    var groups = state.projects.slice().sort(function (a, b) { return a.name.localeCompare(b.name, "sk"); }).map(function (p) { return { project: p, tasks: tasksOfProject(p.id) }; });
+    var noProj = tasksOfProject(null);
+    if (noProj.length) groups.push({ project: null, tasks: noProj });
+
+    groups.forEach(function (g) {
+      var item = document.createElement("div"); item.className = "proj-item";
+      var row1 = document.createElement("div"); row1.className = "proj-row1";
+      var nm = document.createElement("span"); nm.className = "proj-nm"; nm.textContent = g.project ? g.project.name : "Bez projektu";
+      row1.appendChild(nm);
+      if (g.project && g.project.customer) { var cu = document.createElement("span"); cu.className = "proj-cust"; cu.textContent = g.project.customer; row1.appendChild(cu); }
+      if (g.project) {
+        var del = document.createElement("button"); del.className = "icon-btn"; del.type = "button"; del.innerHTML = "🗑"; del.title = "Zmazať projekt"; del.setAttribute("aria-label", "Zmazať projekt");
+        del.addEventListener("click", function () {
+          // detach tasks, keep them under "bez projektu"
+          state.tasks.forEach(function (t) { if (t.projectId === g.project.id) { t.projectId = null; t.customer = g.project.customer || ""; } });
+          state.todos.forEach(function (t) { if (t.projectId === g.project.id) { t.projectId = null; t.customer = g.project.customer || ""; } });
+          state.projects = state.projects.filter(function (x) { return x.id !== g.project.id; });
+          if (selProject === g.project.id) { selProject = ""; selTask = ""; }
+          save(); renderAll();
+        });
+        row1.appendChild(del);
+      }
+      item.appendChild(row1);
+
+      var active = g.tasks.filter(function (t) { return !t.done; }).length;
+      var meta = document.createElement("div"); meta.className = "proj-meta";
+      meta.textContent = g.tasks.length ? (active + " " + plural(active, "aktívna", "aktívne", "aktívnych") + " z " + g.tasks.length + " " + plural(g.tasks.length, "úlohy", "úloh", "úloh")) : "žiadne úlohy";
+      var gActs = state.activities.filter(function (a) { return g.tasks.some(function (t) { return t.id === a.taskId; }); });
+      if (gActs.length) { var gm = sumMin(gActs); meta.textContent += " · " + gActs.length + " " + plural(gActs.length, "aktivita", "aktivity", "aktivít") + (gm ? " · " + fmtDur(gm * 60000) : ""); }
+      item.appendChild(meta);
+
+      if (g.tasks.length) {
+        var ul = document.createElement("ul"); ul.className = "tasks-mini";
+        g.tasks.slice().sort(function (a, b) { return (a.done - b.done) || a.name.localeCompare(b.name, "sk"); }).forEach(function (t) {
+          var li = document.createElement("li"); li.setAttribute("data-task", t.id);
+          var isOpen = !!openTasks[t.id]; if (isOpen) li.className = "tm-open";
+          var tg = document.createElement("button"); tg.type = "button"; tg.className = "tm-toggle" + (isOpen ? " open" : ""); tg.textContent = "▶";
+          tg.setAttribute("aria-expanded", isOpen ? "true" : "false"); tg.setAttribute("aria-label", (isOpen ? "Zbaliť" : "Rozbaliť") + " aktivity úlohy " + t.name);
+          function toggleOpen() { if (openTasks[t.id]) delete openTasks[t.id]; else openTasks[t.id] = true; renderProjectManager(); }
+          tg.addEventListener("click", toggleOpen);
+          var chk = document.createElement("input"); chk.type = "checkbox"; chk.className = "tm-check"; chk.checked = t.done; chk.setAttribute("aria-label", "Hotová úloha");
+          chk.addEventListener("change", function () { t.done = chk.checked; save(); renderAll(); });
+          var name = document.createElement("span"); name.className = "tm-name click" + (t.done ? " done" : ""); name.textContent = t.name; name.title = "Klikni pre aktivity tejto úlohy";
+          name.addEventListener("click", toggleOpen);
+          var tActs = actsOfTask(t.id), tMin = sumMin(tActs);
+          var st = document.createElement("span"); st.className = "tm-stat"; st.textContent = tActs.length ? tActs.length + "×" + (tMin ? " · " + fmtDurShort(tMin * 60000) : "") : "";
+          var x = document.createElement("button"); x.className = "icon-btn"; x.type = "button"; x.innerHTML = "✕"; x.title = "Zmazať úlohu"; x.setAttribute("aria-label", "Zmazať úlohu");
+          x.addEventListener("click", function () {
+            var n = state.activities.filter(function (a) { return a.taskId === t.id; }).length;
+            if (n && !window.confirm("Úloha má " + n + " " + plural(n, "aktivitu", "aktivity", "aktivít") + ". Zmazať aj s nimi?")) return;
+            state.activities = state.activities.filter(function (a) { return a.taskId !== t.id; });
+            state.tasks = state.tasks.filter(function (x2) { return x2.id !== t.id; });
+            if (selTask === t.id) selTask = "";
+            save(); renderAll();
+          });
+          li.appendChild(tg); li.appendChild(chk); li.appendChild(name); li.appendChild(st);
+          if (!t.projectId) {
+            var cb = document.createElement("button"); cb.type = "button"; cb.className = "tm-cust" + (t.customer ? "" : " empty");
+            cb.textContent = t.customer || "+ zákazník"; cb.title = t.customer ? "Zmeniť zákazníka" : "Priradiť zákazníka";
+            cb.addEventListener("click", function () {
+              var v = window.prompt("Zákazník pre úlohu „" + t.name + "“ (prázdne = bez zákazníka):", t.customer || "");
+              if (v === null) return; t.customer = v.trim(); save(); renderAll();
+            });
+            li.appendChild(cb);
+          }
+          li.appendChild(x);
+          ul.appendChild(li);
+          if (isOpen) ul.appendChild(buildTaskDetail(t));
+        });
+        item.appendChild(ul);
+      }
+      host.appendChild(item);
+    });
+  }
+
+  // ---- overview + stats ----
+  // minutes written off in activities (only activities with od–do have a duration), by start day
+  function loggedByDay() {
+    var m = {};
+    state.activities.forEach(function (a) { if (typeof a.minutes === "number" && a.minutes > 0) { var k = dateKey(a.ts); m[k] = (m[k] || 0) + a.minutes; } });
+    return m;
+  }
+  function ratioInfo(logged, work) {
+    if (!work) return { pct: logged ? 100 : 0, cls: logged ? "" : "", txt: "" };
+    var pct = Math.round(logged / work * 100);
+    return { pct: pct, cls: pct > 105 ? "over" : pct < 90 ? "low" : "" };
+  }
+  function setMeter(id, logged, work) {
+    var el = document.getElementById(id); if (!el) return;
+    var r = ratioInfo(logged, work);
+    el.className = "meter" + (r.cls ? " " + r.cls : "");
+    el.firstChild.style.width = Math.min(100, work ? r.pct : 0) + "%";
+    el.title = work ? "odpísané " + r.pct + " % času v práci" : "";
+  }
+  function loggedLine(logged, work) {
+    if (!work && !logged) return "";
+    if (!work) return "odpísané " + fmtDur(logged * 60000);
+    var r = ratioInfo(logged, work), miss = work - logged;
+    var tail = r.cls === "over" ? ' · <span class="overtxt">o ' + fmtDur(-miss * 60000) + ' viac</span>' : (miss >= 1 ? ' · <span class="' + (r.cls === "low" ? "lowtxt" : "") + '">chýba ' + fmtDur(miss * 60000) + '</span>' : "");
+    return "odpísané " + fmtDur(logged * 60000) + " · " + r.pct + " %" + tail;
+  }
+
+  // month shown in the "Čas v práci" card ("YYYY-MM")
+  var viewMonth = dateKey(Date.now()).slice(0, 7);
+  function monthName(m) { return MON[+m.slice(5) - 1].replace(/^./, function (c) { return c.toUpperCase(); }) + " " + m.slice(0, 4); }
+  function shiftMonth(m, n) { var d = new Date(+m.slice(0, 4), +m.slice(5) - 1 + n, 1); return d.getFullYear() + "-" + two(d.getMonth() + 1); }
+  function setViewMonth(m) {
+    var cur = dateKey(Date.now()).slice(0, 7);
+    if (m > cur) m = cur;
+    viewMonth = m; histEdit = null;
+    var nd = document.getElementById("hist-new-date"); if (nd) nd.value = m === cur ? dateKey(Date.now()) : m + "-01";
+    renderOverview();
+  }
+
+  function renderOverview() {
+    var tKey = dateKey(Date.now()), wkStart = startOfWeek(Date.now()).getTime(), curM = tKey.slice(0, 7);
+    if (viewMonth > curM) viewMonth = curM;
+    var mKey = viewMonth, isCur = mKey === curM;
+    var ak = activeKey(), today = dayCalc(ak).work;
+    // month totals (sums include a running shift; the average counts only finished days)
+    var month = 0, monthDays = 0, closedW = 0, closedD = 0, week = 0;
+    Object.keys(state.attendance).forEach(function (k) {
+      var c = dayCalc(k), w = c.work; if (w <= 0) return;
+      if (k.slice(0, 7) === mKey) { month += w; monthDays++; if (!c.open) { closedW += w; closedD++; } }
+      if (isCur && parseDate(k).getTime() >= wkStart) week += w;
+    });
+    var LG = loggedByDay(), lToday = LG[ak] || 0, lWeek = 0, lMonth = 0;
+    Object.keys(LG).forEach(function (k) {
+      if (k.slice(0, 7) === mKey) lMonth += LG[k];
+      if (isCur && parseDate(k).getTime() >= wkStart) lWeek += LG[k];
+    });
+    // header
+    document.getElementById("m-label").textContent = monthName(mKey);
+    document.getElementById("m-next").disabled = isCur;
+    document.getElementById("m-now").hidden = isCur;
+    document.getElementById("tw-card").classList.toggle("past", !isCur);
+    var mShort = MON[+mKey.slice(5) - 1];
+    // tile 1: time at work in the month
+    document.getElementById("stat-month-k").textContent = "V práci · " + mShort;
+    document.getElementById("stat-month").textContent = fmtDur(month * 60000);
+    document.getElementById("stat-month-s").textContent = monthDays ? monthDays + " " + plural(monthDays, "deň", "dni", "dní") + (closedD ? " · ø " + fmtDur(closedW / closedD * 60000) + "/deň" : "") : "žiadna dochádzka";
+    // tile 2: written off in activities in the month
+    document.getElementById("stat-total-k").textContent = "Odpísané · " + mShort;
+    document.getElementById("stat-total").textContent = fmtDur(lMonth * 60000);
+    var rt = ratioInfo(lMonth, month);
+    document.getElementById("stat-total-s").innerHTML = month ? (rt.pct + " % z času v práci" + (month - lMonth >= 1 ? ' · <span class="' + (rt.cls === "low" ? "lowtxt" : "") + '">neodpísané ' + fmtDur((month - lMonth) * 60000) + '</span>' : (lMonth - month >= 1 ? ' · <span class="overtxt">o ' + fmtDur((lMonth - month) * 60000) + ' viac</span>' : ""))) : (lMonth ? "bez dochádzky v tomto mesiaci" : "zatiaľ nič");
+    setMeter("stat-total-m", lMonth, month);
+    // tiles 3–4: only for the current month
+    if (isCur) {
+      document.getElementById("stat-today").textContent = fmtDur(today * 60000);
+      document.getElementById("stat-today-s").innerHTML = loggedLine(lToday, today) || (ak !== tKey && today ? "zmena od " + esc(dayLabel(ak)) : "");
+      setMeter("stat-today-m", lToday, today);
+      document.getElementById("stat-week").textContent = fmtDur(week * 60000);
+      document.getElementById("stat-week-s").innerHTML = loggedLine(lWeek, week);
+      setMeter("stat-week-m", lWeek, week);
+    }
+    document.getElementById("hist-title").textContent = "Dni · " + mShort + " · klikni na deň a uprav";
+    renderMonthChart(tKey, LG); if (!histEdit) renderHistory(); renderProjectStats();
+  }
+  var histEdit = null;   // date key currently being edited inline in the history table
+  function dayLabel(k) { var d = parseDate(k); return DAY_NAMES[(d.getDay() + 6) % 7] + " " + d.getDate() + "." + (d.getMonth() + 1) + "."; }
+  function openHistEdit(k) { if (k.slice(0, 7) !== viewMonth) { viewMonth = k.slice(0, 7); histEdit = k; attDate = k; renderOverview(); } histEdit = k; attDate = k; renderAttendance(); renderHistory(); var f = document.querySelector(".hist-edit input"); if (f) f.focus(); }
+  function renderHistory() {
+    var body = document.getElementById("hist-body"); body.innerHTML = "";
+    var keys = Object.keys(state.attendance).filter(function (k) { return !!rec(k) && k.slice(0, 7) === viewMonth; }).sort().reverse();
+    var LGd = loggedByDay();
+    if (histEdit && keys.indexOf(histEdit) < 0) { keys.push(histEdit); keys.sort().reverse(); }
+    if (!keys.length) { body.innerHTML = '<tr><td colspan="7" class="dim" style="font-family:var(--font-body);font-weight:400;text-align:center;padding:14px 4px">' + (viewMonth === dateKey(Date.now()).slice(0, 7) ? "Tento mesiac zatiaľ žiadna dochádzka. Pipni príchod, alebo pridaj deň ručne cez „+ Pridať deň“." : "V tomto mesiaci nie je žiadna dochádzka.") + '</td></tr>'; return; }
+    keys.forEach(function (k) {
+      var r = rec(k) || { segs: [] }, c = dayCalc(k), u = unwrapSegs(r);
+      var firstS = r.segs.filter(function (x) { return x.in; })[0], lastOut = null, lastOutM = null;
+      r.segs.forEach(function (x, i) { if (x.out) { lastOut = x.out; lastOutM = u[i].out; } });
+      var tr = document.createElement("tr"); if (k === attDate) tr.className = "sel"; if (k === histEdit) tr.className = "sel editing";
+      var outCell = c.open ? '<td class="dim">beží</td>' : (lastOut ? '<td>' + lastOut + (lastOutM >= 1440 ? '<sup class="nd" title="nasledujúci deň">+1</sup>' : '') + '</td>' : '<td class="dim">—</td>');
+      var segList = r.segs.filter(function (x) { return x.in; }).map(function (x) { return x.in + "–" + (x.out || "…"); }).join(", ");
+      var lg = LGd[k] || 0, ri = ratioInfo(lg, c.work);
+      var lgCell = lg || c.work ? '<td class="num lgd"><div class="lgv">' + (lg ? fmtDurShort(lg * 60000) : '<span class="dim">0h00</span>') + (c.work ? '<small class="' + ri.cls + '">' + ri.pct + '%</small>' : '') + '</div>' +
+        (c.work ? '<div class="meter' + (ri.cls ? " " + ri.cls : "") + '"><i style="width:' + Math.min(100, ri.pct) + '%"></i></div>' : '') + '</td>' : '<td class="num dim">—</td>';
+      tr.innerHTML = '<td>' + dayLabel(k) + (c.count > 1 ? ' <span class="segs-cell">' + c.count + '×</span>' : '') + '</td>' + (firstS ? '<td>' + firstS.in + '</td>' : '<td class="dim">—</td>') + outCell +
+        '<td class="num">' + (c.brk ? fmtDurShort(c.brk * 60000) : '<span class="dim">—</span>') + '</td>' +
+        '<td class="num">' + (c.work ? fmtDurShort(c.work * 60000) : '<span class="dim">—</span>') + '</td>' + lgCell +
+        '<td class="act"><button class="icon-btn edit" type="button" title="Upraviť úseky" aria-label="Upraviť úseky ' + dayLabel(k) + '">✎</button><button class="icon-btn del" type="button" title="Vymazať deň" aria-label="Vymazať deň ' + dayLabel(k) + '">🗑</button></td>';
+      tr.title = segList ? "Úseky: " + segList + " · kliknutím upravíš" : "Kliknutím upravíš";
+      tr.querySelector(".icon-btn.del").addEventListener("click", function (e) { e.stopPropagation(); deleteDay(k); });
+      tr.addEventListener("click", function () { if (histEdit === k) { histEdit = null; renderHistory(); } else openHistEdit(k); });
+      body.appendChild(tr);
+      if (k === histEdit) body.appendChild(buildHistEditor(k));
+    });
+  }
+  function buildHistEditor(k) {
+    var orig = rec(k);
+    var draft = { segs: orig ? orig.segs.map(function (x) { return { in: x.in, out: x.out }; }) : [], done: orig ? orig.done : true };
+    if (!draft.segs.length) draft.segs.push({ in: null, out: null });
+    var tr = document.createElement("tr"); tr.className = "hist-edit";
+    var td = document.createElement("td"); td.colSpan = 7; tr.appendChild(td);
+    var segHost = document.createElement("div"); td.appendChild(segHost);
+    var addB = mkBtn("+ pridať úsek", "btn-ghost btn-sm seg-add", function () { draft.segs.push({ in: null, out: null }); draw(); var ins = segHost.querySelectorAll(".seg-row:last-child input"); if (ins[0]) ins[0].focus(); });
+    td.appendChild(addB);
+    var foot = document.createElement("div"); foot.className = "he-foot";
+    var info = document.createElement("div"); info.className = "he-info";
+    var acts = document.createElement("div"); acts.className = "he-actions";
+    var del = mkBtn("Vymazať deň", "btn-stop btn-sm", function () { if (!rec(k)) { cancel(); return; } deleteDay(k); });
+    var cancelB = mkBtn("Zrušiť", "btn-ghost btn-sm", cancel);
+    var saveB = mkBtn("Uložiť", "btn-primary btn-sm", saveEdit);
+    acts.appendChild(del); acts.appendChild(cancelB); acts.appendChild(saveB);
+    foot.appendChild(info); foot.appendChild(acts); td.appendChild(foot);
+    function onKey(e) { if (e.key === "Enter") { e.preventDefault(); e.target.dispatchEvent(new Event("change")); segHost._dirty = false; saveEdit(); } else if (e.key === "Escape") { segHost._dirty = false; cancel(); } }
+    function draw() {
+      renderSegRows(segHost, k, draft, draw, { draft: true, onKey: onKey, emptyText: "Žiadne úseky — pridaj aspoň jeden." });
+      var err = validateRec(draft), c = calcRec(k, { segs: draft.segs.filter(function (x) { return x.in || x.out; }), done: true });
+      info.textContent = err || ("Odpracované " + fmtDur(c.work * 60000) + " · prestávky " + fmtDur(c.brk * 60000) + " · " + c.count + " " + plural(c.count, "úsek", "úseky", "úsekov"));
+      info.className = "he-info" + (err ? " warn" : "");
+      saveB.disabled = !!err;
+    }
+    function saveEdit() {
+      if (validateRec(draft)) { draw(); return; }
+      var segs = draft.segs.filter(function (x) { return x.in || x.out; });
+      if (!segs.length) { delete state.attendance[k]; }
+      else {
+        var ls = segs[segs.length - 1];
+        // keep a running day running; otherwise a closed last segment means the day is finished
+        var keepOpen = orig && !orig.done && k === activeKey() && !ls.out;
+        state.attendance[k] = { segs: segs, done: keepOpen ? false : !!ls.out };
+      }
+      histEdit = null; save(); afterAttChange();
+    }
+    function cancel() { histEdit = null; renderHistory(); }
+    tr.addEventListener("click", function (e) { e.stopPropagation(); });
+    draw();
+    return tr;
+  }
+  function deleteDay(k) {
+    if (!rec(k)) return false;
+    if (!window.confirm("Vymazať dochádzku za " + dayLabel(k) + "? Aktivity zostanú zachované.")) return false;
+    delete state.attendance[k]; if (histEdit === k) histEdit = null;
+    save(); afterAttChange(); return true;
+  }
+  function afterAttChange() { renderPresence(); renderAttendance(); renderOverview(); renderHistory(); }
+  function renderMonthChart(tKey, LG) {
+    var y = +viewMonth.slice(0, 4), m = +viewMonth.slice(5) - 1, n = new Date(y, m + 1, 0).getDate();
+    var host = document.getElementById("month-chart"); host.innerHTML = "";
+    host.style.gridTemplateColumns = "repeat(" + n + ", minmax(0, 1fr))";
+    var work = [], logged = [], max = 1;
+    for (var i = 1; i <= n; i++) { var k = viewMonth + "-" + two(i); work[i] = dayCalc(k).work; logged[i] = LG[k] || 0; max = Math.max(max, work[i], logged[i]); }
+    for (var j = 1; j <= n; j++) (function (j) {
+      var k = viewMonth + "-" + two(j), d = new Date(y, m, j), wd = (d.getDay() + 6) % 7, has = work[j] > 0;
+      var el = document.createElement("div");
+      el.className = "mday" + (has ? " has" : "") + (wd >= 5 ? " we" : "") + (k === tKey ? " today" : "") + (k === attDate ? " sel" : "");
+      var pct = Math.round(work[j] / max * 100), lp = has ? Math.min(100, Math.round(logged[j] / work[j] * 100)) : 0, over = has && logged[j] > work[j] * 1.05;
+      el.title = DAY_NAMES[wd] + " " + j + "." + (m + 1) + ".: " + (has ? "v práci " + fmtDur(work[j] * 60000) + " · odpísané " + fmtDur(logged[j] * 60000) + " (" + Math.round(logged[j] / work[j] * 100) + " %)" : (logged[j] ? "bez dochádzky · odpísané " + fmtDur(logged[j] * 60000) : "bez záznamu"));
+      el.innerHTML = '<div class="bar-track"><div class="bar" style="height:' + (has ? Math.max(pct, 4) : 3) + '%">' + (has ? '<div class="logged' + (over ? ' over' : '') + '" style="height:' + lp + '%"></div>' : '') + '</div></div><div class="dn">' + j + '</div>';
+      el.addEventListener("click", function () { if (rec(k)) openHistEdit(k); else { attDate = k; renderAttendance(); renderMonthChart(tKey, loggedByDay()); } });
+      host.appendChild(el);
+    })(j);
+  }
+  function renderProjectStats() {
+    var host = document.getElementById("project-stats"); host.innerHTML = "";
+    if (!state.activities.length) { host.innerHTML = '<div class="empty">Zatiaľ žiadne zaznamenané aktivity.</div>'; return; }
+    var map = {};
+    state.activities.forEach(function (a) {
+      var t = taskById(a.taskId); var proj = projNameOfTask(t) || "Bez projektu"; var cust = custOfTask(t);
+      var key = proj + "\u0000" + cust;
+      var p = map[key] || (map[key] = { proj: proj, cust: cust, min: 0, count: 0 });
+      p.count += 1; if (typeof a.minutes === "number") p.min += a.minutes;
+    });
+    var rows = Object.keys(map).map(function (k) { return map[k]; }).sort(function (a, b) { return (b.min - a.min) || (b.count - a.count); });
+    var max = rows.reduce(function (m, r) { return Math.max(m, r.min); }, 1);
+    rows.forEach(function (r) {
+      var row = document.createElement("div"); row.className = "pstat";
+      var right = r.min > 0 ? fmtDur(r.min * 60000) : r.count + "×";
+      row.innerHTML = '<div class="pstat-top"><span class="pstat-nm">' + esc(r.proj) + (r.cust ? ' <small>· ' + esc(r.cust) + '</small>' : '') + '</span><span class="pstat-v">' + right + '</span></div>' +
+        (r.min > 0 ? '<div class="pstat-meter"><span style="width:' + Math.max(Math.round(r.min / max * 100), 2) + '%"></span></div>' : '');
+      host.appendChild(row);
+    });
+  }
+
+  function renderDatalists() {
+    var cust = {}; state.projects.forEach(function (p) { if (p.customer) cust[p.customer] = 1; });
+    state.tasks.forEach(function (t) { if (!t.projectId && t.customer) cust[t.customer] = 1; });
+    var dl = document.getElementById("cust-list"); dl.innerHTML = "";
+    Object.keys(cust).forEach(function (v) { dl.appendChild(new Option(v, v)); });
+  }
+
+  // ---- to-do ----
+  var TODO_TAB_KEY = "pracovny_dennik_todo_tab";
+  var todoTab = "all"; try { todoTab = localStorage.getItem(TODO_TAB_KEY) || "all"; } catch (e) {}
+  var todoEdit = null, showOldDone = false;
+  var PRIO_LABEL = ["Bežná", "Stredná", "Vysoká"];
+  function allCustomers() {
+    var c = {}; state.projects.forEach(function (p) { if (p.customer) c[p.customer] = 1; });
+    state.tasks.forEach(function (t) { if (!t.projectId && t.customer) c[t.customer] = 1; });
+    state.todos.forEach(function (t) { if (!t.projectId && t.customer) c[t.customer] = 1; });
+    return Object.keys(c).sort(function (a, b) { return a.localeCompare(b, "sk"); });
+  }
+  // one select for "projekt alebo zákazník": "", "p:<id>", "c:<name>", "new" (= ask for a new customer)
+  function fillAssignSelect(sel, value) {
+    sel.innerHTML = "";
+    sel.appendChild(new Option("Bez projektu / zákazníka", ""));
+    var gp = document.createElement("optgroup"); gp.label = "Projekt";
+    state.projects.slice().sort(function (a, b) { return a.name.localeCompare(b.name, "sk"); }).forEach(function (p) { gp.appendChild(new Option(p.name + (p.customer ? " — " + p.customer : ""), "p:" + p.id)); });
+    if (gp.children.length) sel.appendChild(gp);
+    var gc = document.createElement("optgroup"); gc.label = "Zákazník (bez projektu)";
+    allCustomers().forEach(function (c) { gc.appendChild(new Option(c, "c:" + c)); });
+    gc.appendChild(new Option("+ nový zákazník…", "new"));
+    sel.appendChild(gc);
+    sel.value = value || "";
+    if (sel.value !== (value || "")) sel.value = "";
+  }
+  function assignOf(t) { return t.projectId ? "p:" + t.projectId : (t.customer ? "c:" + t.customer : ""); }
+  function applyAssign(t, v) {
+    t.projectId = null; t.customer = "";
+    if (v && v.indexOf("p:") === 0 && projectById(v.slice(2))) t.projectId = v.slice(2);
+    else if (v && v.indexOf("c:") === 0) t.customer = v.slice(2);
+  }
+  function wireNewCustomer(sel, prev) {
+    sel.addEventListener("focus", function () { prev = sel.value; });
+    sel.addEventListener("change", function () {
+      if (sel.value !== "new") { prev = sel.value; return; }
+      var n = window.prompt("Názov nového zákazníka:", "");
+      n = n && n.trim();
+      if (!n) { sel.value = prev || ""; return; }
+      var o = new Option(n, "c:" + n); sel.querySelector('optgroup[label^="Zákazník"]').insertBefore(o, sel.querySelector('option[value="new"]'));
+      sel.value = "c:" + n; prev = sel.value;
+    });
+  }
+  function todayKey() { return dateKey(Date.now()); }
+  function endOfWeekKey() { var d = startOfWeek(Date.now()); d.setDate(d.getDate() + 6); return dateKey(d.getTime()); }
+  function dueInfo(t) {
+    if (!t.due) return null;
+    var tk = todayKey(), d = parseDate(t.due), diff = Math.round((d - parseDate(tk)) / 86400000);
+    var label = diff === 0 ? "dnes" : diff === 1 ? "zajtra" : diff === -1 ? "včera" : (DAY_NAMES[(d.getDay() + 6) % 7].toLowerCase() + " " + d.getDate() + "." + (d.getMonth() + 1) + ".");
+    if (diff < -1) label = "od " + label;
+    return { label: label, cls: t.done ? "due" : (diff < 0 ? "late" : diff === 0 ? "today" : "due"), late: !t.done && diff < 0 };
+  }
+  function todoSort(a, b) {
+    var ad = a.due || "9999", bd = b.due || "9999";
+    return (ad < bd ? -1 : ad > bd ? 1 : 0) || (b.prio - a.prio) || (a.createdAt - b.createdAt);
+  }
+  function inTab(t, tab) {
+    var tk = todayKey();
+    if (tab === "today") return !!t.due && t.due <= tk;
+    if (tab === "week") return !!t.due && t.due <= endOfWeekKey();
+    if (tab === "late") return !!t.due && t.due < tk;
+    return true;
+  }
+  function renderTodoInputs() {
+    var sel = document.getElementById("todo-assign"), v = sel.value;
+    fillAssignSelect(sel, v);
+  }
+  function renderTodos() {
+    var open = state.todos.filter(function (t) { return !t.done; });
+    var tk = todayKey();
+    var doneToday = state.todos.filter(function (t) { return t.done && t.doneAt && dateKey(t.doneAt) === tk; });
+    var doneOld = state.todos.filter(function (t) { return t.done && !(t.doneAt && dateKey(t.doneAt) === tk); });
+    var late = open.filter(function (t) { return inTab(t, "late"); }).length;
+    var cnt = document.getElementById("todo-count");
+    cnt.textContent = open.length ? (open.length + " " + plural(open.length, "otvorené", "otvorené", "otvorených") + (late ? " · " + late + " po termíne" : "")) : "";
+    cnt.className = "todo-count" + (late ? " late" : "");
+
+    var tabs = [["today", "Dnes"], ["week", "Týždeň"], ["all", "Všetko"], ["late", "Po termíne"]];
+    var th = document.getElementById("todo-tabs"); th.innerHTML = "";
+    tabs.forEach(function (x) {
+      var n = open.filter(function (t) { return inTab(t, x[0]); }).length;
+      var b = document.createElement("button"); b.type = "button"; b.setAttribute("role", "tab");
+      b.className = "todo-tab" + (todoTab === x[0] ? " on" : "") + (x[0] === "late" && n ? " late" : "");
+      b.setAttribute("aria-selected", todoTab === x[0] ? "true" : "false");
+      b.innerHTML = esc(x[1]) + "<b>" + n + "</b>";
+      b.title = { today: "Termín dnes alebo skôr", week: "Termín do nedele (vrátane po termíne)", all: "Všetky otvorené", late: "Termín už prešiel" }[x[0]];
+      b.addEventListener("click", function () { todoTab = x[0]; try { localStorage.setItem(TODO_TAB_KEY, todoTab); } catch (e) {} renderTodos(); });
+      th.appendChild(b);
+    });
+
+    var host = document.getElementById("todo-list"); host.innerHTML = "";
+    var list = open.filter(function (t) { return inTab(t, todoTab); }).sort(todoSort);
+    // done today stays visible (struck through) so it can be turned into an activity
+    var shownDone = todoTab === "all" || todoTab === "today" ? doneToday.slice().sort(function (a, b) { return b.doneAt - a.doneAt; }) : [];
+    if (!list.length && !shownDone.length) {
+      host.innerHTML = '<div class="todo-empty">' + ({ today: "Na dnes nič s termínom.", week: "Tento týždeň nič s termínom.", late: "Nič nie je po termíne.", all: "Žiadne to-do. Napíš hore, čo treba spraviť." }[todoTab]) + '</div>';
+    }
+    list.concat(shownDone).forEach(function (t) { host.appendChild(todoRow(t)); });
+
+    var foot = document.getElementById("todo-foot"); foot.innerHTML = "";
+    if (doneOld.length) {
+      var tg = document.createElement("button"); tg.type = "button"; tg.className = "linkbtn";
+      tg.textContent = (showOldDone ? "▾" : "▸") + " Staršie hotové (" + doneOld.length + ")";
+      tg.addEventListener("click", function () { showOldDone = !showOldDone; renderTodos(); });
+      foot.appendChild(tg);
+    }
+    var allDone = state.todos.filter(function (t) { return t.done; }).length;
+    if (allDone) {
+      var clr = document.createElement("button"); clr.type = "button"; clr.className = "linkbtn"; clr.textContent = "Vymazať hotové";
+      clr.addEventListener("click", function () {
+        if (!window.confirm("Vymazať " + allDone + " " + plural(allDone, "hotové to-do", "hotové to-do", "hotových to-do") + "?")) return;
+        state.todos = state.todos.filter(function (t) { return !t.done; }); save(); renderTodos();
+      });
+      foot.appendChild(clr);
+    }
+    if (showOldDone && doneOld.length) {
+      var dl = document.createElement("div"); dl.className = "todo-done-list";
+      doneOld.sort(function (a, b) { return (b.doneAt || 0) - (a.doneAt || 0); }).forEach(function (t) { dl.appendChild(todoRow(t)); });
+      foot.appendChild(dl); dl.style.flexBasis = "100%";
+    }
+  }
+  function todoRow(t) {
+    if (todoEdit === t.id) return todoEditor(t);
+    var row = document.createElement("div"); row.className = "td" + (t.done ? " done" : "");
+    var pr = document.createElement("span"); pr.className = "prio p" + (t.prio || 0); pr.title = "Priorita: " + PRIO_LABEL[t.prio || 0];
+    var chk = document.createElement("input"); chk.type = "checkbox"; chk.className = "tm-check"; chk.checked = !!t.done; chk.setAttribute("aria-label", "Hotové: " + t.text);
+    chk.addEventListener("change", function () { t.done = chk.checked; t.doneAt = chk.checked ? Date.now() : null; save(); renderTodos(); });
+    var nm = document.createElement("span"); nm.className = "nm"; nm.textContent = t.text; nm.title = "Klikni pre úpravu";
+    nm.addEventListener("click", function () { todoEdit = t.id; renderTodos(); });
+    var chips = document.createElement("span"); chips.className = "chips";
+    var di = dueInfo(t); if (di && !t.done) chips.innerHTML += '<span class="chip ' + di.cls + '">' + esc(di.label) + '</span>';
+    var p = t.projectId ? projectById(t.projectId) : null;
+    if (p) chips.innerHTML += '<span class="chip proj" title="' + esc(p.name + (p.customer ? " — " + p.customer : "")) + '">' + esc(p.name) + '</span>';
+    else if (t.customer) chips.innerHTML += '<span class="chip cust">' + esc(t.customer) + '</span>';
+    row.appendChild(pr); row.appendChild(chk); row.appendChild(nm);
+    if (t.done) {
+      var act = document.createElement("button"); act.type = "button"; act.className = "to-act"; act.textContent = "→ zapísať ako aktivitu";
+      act.title = "Predvyplní formulár „Zapísať, čo robím“";
+      act.addEventListener("click", function () { todoToActivity(t); });
+      row.appendChild(act);
+    } else row.appendChild(chips);
+    var ed = document.createElement("button"); ed.type = "button"; ed.className = "icon-btn edit"; ed.textContent = "✎"; ed.title = "Upraviť"; ed.setAttribute("aria-label", "Upraviť to-do");
+    ed.addEventListener("click", function () { todoEdit = t.id; renderTodos(); });
+    var x = document.createElement("button"); x.type = "button"; x.className = "icon-btn"; x.textContent = "✕"; x.title = "Zmazať"; x.setAttribute("aria-label", "Zmazať to-do");
+    x.addEventListener("click", function () { state.todos = state.todos.filter(function (y) { return y.id !== t.id; }); save(); renderTodos(); });
+    if (!t.done) row.appendChild(ed);
+    row.appendChild(x);
+    return row;
+  }
+  function todoEditor(t) {
+    var box = document.createElement("div"); box.className = "td-edit";
+    var txt = document.createElement("input"); txt.type = "text"; txt.value = t.text; txt.setAttribute("aria-label", "Text to-do");
+    var r2 = document.createElement("div"); r2.className = "row";
+    var as = document.createElement("select"); as.className = "ed-assign"; fillAssignSelect(as, assignOf(t)); wireNewCustomer(as, assignOf(t));
+    var du = document.createElement("input"); du.type = "date"; du.className = "ed-due"; du.value = t.due || "";
+    var pr = document.createElement("select"); pr.className = "ed-prio"; PRIO_LABEL.forEach(function (l, i) { pr.appendChild(new Option(l, String(i))); }); pr.value = String(t.prio || 0);
+    r2.appendChild(as); r2.appendChild(du); r2.appendChild(pr);
+    var acts = document.createElement("div"); acts.className = "acts";
+    function done() { todoEdit = null; renderTodos(); }
+    function saveIt() {
+      var v = txt.value.trim(); if (!v) { txt.focus(); return; }
+      t.text = v; applyAssign(t, as.value); t.due = du.value || null; t.prio = +pr.value || 0;
+      save(); done();
+    }
+    acts.appendChild(mkBtn("Zrušiť", "btn-ghost btn-sm", done));
+    acts.appendChild(mkBtn("Uložiť", "btn-primary btn-sm", saveIt));
+    [txt, du].forEach(function (el) { el.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); saveIt(); } else if (e.key === "Escape") done(); }); });
+    box.appendChild(txt); box.appendChild(r2); box.appendChild(acts);
+    setTimeout(function () { txt.focus(); }, 0);
+    return box;
+  }
+  function addTodo() {
+    var inp = document.getElementById("todo-text"), v = inp.value.trim();
+    if (!v) { inp.focus(); return; }
+    var t = { id: uid(), text: v, projectId: null, customer: "", due: document.getElementById("todo-due").value || null, prio: +document.getElementById("todo-prio").value || 0, done: false, doneAt: null, createdAt: Date.now() };
+    applyAssign(t, document.getElementById("todo-assign").value);
+    state.todos.push(t);
+    // make sure the new item is visible in the current tab
+    if (!inTab(t, todoTab)) { todoTab = "all"; try { localStorage.setItem(TODO_TAB_KEY, todoTab); } catch (e) {} }
+    inp.value = ""; document.getElementById("todo-due").value = ""; document.getElementById("todo-prio").value = "0";
+    save(); renderTodos(); renderTodoInputs(); inp.focus();
+  }
+  // prefill the "Zapísať, čo robím" form from a finished to-do
+  function todoToActivity(t) {
+    selProject = t.projectId && projectById(t.projectId) ? t.projectId : "";
+    renderProjectSelect(); renderTaskSelect(); updateTaskForm();
+    var cands = tasksOfProject(selProject).filter(function (x) { return !x.done; });
+    if (!selProject && t.customer) cands = cands.filter(function (x) { return x.customer === t.customer; });
+    var same = cands.filter(function (x) { return x.name.toLowerCase() === t.text.toLowerCase(); })[0];
+    var pick = same || (cands.length === 1 ? cands[0] : null);
+    selTask = pick ? pick.id : ""; renderTaskSelect();
+    document.getElementById("act-date").value = t.doneAt ? dateKey(t.doneAt) : todayKey();
+    var ta = document.getElementById("act-text"); ta.value = t.text;
+    renderActSpan();
+    if (pick) hint("Predvyplnené z to-do. Doplň čas od–do a daj Zapísať (Ctrl+Enter).", false);
+    else {
+      if (!cands.length) {
+        document.getElementById("nt-name").value = t.text; document.getElementById("nt-cust").value = selProject ? "" : (t.customer || "");
+        toggle("add-task", true);
+        hint("Predvyplnené z to-do. Najprv klikni „Pridať úlohu“ (je predvyplnená), potom doplň čas a Zapísať.", true);
+      } else hint("Predvyplnené z to-do — vyber úlohu zo zoznamu, potom doplň čas a Zapísať.", true);
+    }
+    var card = ta.closest(".card"); card.scrollIntoView({ behavior: "smooth", block: "start" });
+    card.classList.remove("flash"); void card.offsetWidth; card.classList.add("flash");
+    setTimeout(function () { (pick ? document.getElementById("act-from") : (cands.length ? document.getElementById("sel-task") : document.getElementById("nt-save"))).focus({ preventScroll: true }); }, 350);
+  }
+  document.getElementById("todo-add").addEventListener("click", addTodo);
+  document.getElementById("todo-text").addEventListener("keydown", function (e) { if (e.key === "Enter") addTodo(); });
+  wireNewCustomer(document.getElementById("todo-assign"), "");
+
+  function renderAll() { renderTodoInputs(); renderTodos(); renderPresence(); renderAttendance(); renderProjectSelect(); renderTaskSelect(); renderProjectManager(); renderLog(); renderOverview(); renderDatalists(); }
+
+  // ---- header + theme ----
+  (function () { var d = new Date(); document.getElementById("today-date").textContent = DAY_NAMES[(d.getDay() + 6) % 7] + ", " + d.getDate() + ". " + MON[d.getMonth()] + " " + d.getFullYear(); })();
+  (function () { try { var s = localStorage.getItem(THEME_KEY); if (s) document.documentElement.setAttribute("data-theme", s); } catch (e) {} })();
+  document.getElementById("theme-toggle").addEventListener("click", function () {
+    var cur = document.documentElement.getAttribute("data-theme");
+    var isDark = cur ? cur === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    var next = isDark ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+  });
+
+  // ---- wiring: attendance ----
+  document.getElementById("att-add-seg").addEventListener("click", function () { addSegTo(attDate); });
+  document.getElementById("att-date").addEventListener("change", function (e) { if (e.target.value) { attDate = e.target.value; histEdit = null; renderAttendance(); renderHistory(); } });
+  document.getElementById("m-prev").addEventListener("click", function () { setViewMonth(shiftMonth(viewMonth, -1)); });
+  document.getElementById("m-next").addEventListener("click", function () { setViewMonth(shiftMonth(viewMonth, 1)); });
+  document.getElementById("m-now").addEventListener("click", function () { setViewMonth(dateKey(Date.now()).slice(0, 7)); });
+  document.getElementById("m-csv").addEventListener("click", function () { downloadFile("m-csv", "pracovny-dennik-dochadzka-" + viewMonth + ".csv", "\uFEFF" + buildAttCSV(viewMonth), "text/csv;charset=utf-8"); });
+  document.getElementById("hist-add-btn").addEventListener("click", function () {
+    var v = document.getElementById("hist-new-date").value || dateKey(Date.now());
+    openHistEdit(v);
+  });
+  document.getElementById("att-del").addEventListener("click", function () {
+    if (!rec(attDate)) { attHint("Tento deň nemá žiadne zapísané časy.", true); return; }
+    deleteDay(attDate);
+  });
+  document.getElementById("att-prev").addEventListener("click", function () { shiftAttDate(-1); });
+  document.getElementById("att-next").addEventListener("click", function () { shiftAttDate(1); });
+
+  // ---- wiring: selectors ----
+  document.getElementById("sel-project").addEventListener("change", function (e) { selProject = e.target.value; selTask = ""; renderTaskSelect(); updateTaskForm(); });
+  document.getElementById("sel-task").addEventListener("change", function (e) { selTask = e.target.value; });
+
+  function toggle(id, on) { var el = document.getElementById(id); el.classList.toggle("open", on === undefined ? !el.classList.contains("open") : on); }
+  document.getElementById("btn-new-project").addEventListener("click", function () { toggle("add-project"); var o = document.getElementById("add-project").classList.contains("open"); if (o) document.getElementById("np-name").focus(); });
+  function updateTaskForm() {
+    var p = selProject ? projectById(selProject) : null;
+    document.getElementById("nt-cust-field").style.display = p ? "none" : "";
+    document.getElementById("nt-note").textContent = p ? "Úloha sa pridá do projektu „" + p.name + "“" + (p.customer ? " (zákazník " + p.customer + ")" : "") + ". Pre úlohu bez projektu prepni Projekt na „(bez projektu)“." : "Úloha bez projektu — zákazníka môžeš vybrať zo zoznamu alebo napísať nového.";
+  }
+  document.getElementById("btn-new-task").addEventListener("click", function () { updateTaskForm(); toggle("add-task"); var o = document.getElementById("add-task").classList.contains("open"); if (o) document.getElementById("nt-name").focus(); });
+
+  function saveProject() {
+    var name = document.getElementById("np-name").value.trim(); if (!name) { document.getElementById("np-name").focus(); return; }
+    var p = { id: uid(), name: name, customer: document.getElementById("np-cust").value.trim() };
+    state.projects.push(p); selProject = p.id; selTask = "";
+    document.getElementById("np-name").value = ""; document.getElementById("np-cust").value = "";
+    toggle("add-project", false); save(); renderAll();
+  }
+  document.getElementById("np-save").addEventListener("click", saveProject);
+  document.getElementById("np-name").addEventListener("keydown", function (e) { if (e.key === "Enter") saveProject(); });
+  document.getElementById("np-cust").addEventListener("keydown", function (e) { if (e.key === "Enter") saveProject(); });
+
+  function saveTask() {
+    var name = document.getElementById("nt-name").value.trim(); if (!name) { document.getElementById("nt-name").focus(); return; }
+    var t = { id: uid(), name: name, projectId: selProject || null, customer: selProject ? "" : document.getElementById("nt-cust").value.trim(), done: false };
+    state.tasks.push(t); selTask = t.id;
+    document.getElementById("nt-name").value = ""; document.getElementById("nt-cust").value = "";
+    toggle("add-task", false); save(); renderAll(); document.getElementById("act-text").focus();
+  }
+  document.getElementById("nt-save").addEventListener("click", saveTask);
+  document.getElementById("nt-name").addEventListener("keydown", function (e) { if (e.key === "Enter") saveTask(); });
+  document.getElementById("nt-cust").addEventListener("keydown", function (e) { if (e.key === "Enter") saveTask(); });
+
+  document.getElementById("btn-del-task").addEventListener("click", function () {
+    if (!selTask) { hint("Najprv vyber úlohu, ktorú chceš zmazať.", true); return; }
+    var t = taskById(selTask); if (!t) return;
+    var n = state.activities.filter(function (a) { return a.taskId === t.id; }).length;
+    if (n && !window.confirm("Úloha má " + n + " " + plural(n, "aktivitu", "aktivity", "aktivít") + ". Zmazať aj s nimi?")) return;
+    state.activities = state.activities.filter(function (a) { return a.taskId !== t.id; });
+    state.tasks = state.tasks.filter(function (x) { return x.id !== t.id; });
+    selTask = ""; save(); renderAll();
+  });
+
+  // ---- wiring: write activity ----
+  function hint(msg, warn) { var h = document.getElementById("write-hint"); h.textContent = msg; h.className = "hint" + (warn ? " warn" : ""); }
+  function saveActivity() {
+    var text = document.getElementById("act-text").value.trim();
+    if (!text) { document.getElementById("act-text").focus(); return; }
+    if (!selTask) { hint("Najprv vyber úlohu (alebo ju pridaj cez +).", true); return; }
+    var dateVal = document.getElementById("act-date").value;
+    var fromVal = document.getElementById("act-from").value;
+    var toVal = document.getElementById("act-to").value;
+    var now = new Date();
+    var baseDate = dateVal ? parseDate(dateVal) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var ts, end = null, minutes = null;
+    if (fromVal) ts = withTime(baseDate, fromVal);
+    else if (!dateVal || dateKey(now.getTime()) === dateVal) ts = now.getTime();
+    else ts = withTime(baseDate, two(now.getHours()) + ":" + two(now.getMinutes()));
+    if (fromVal && toVal) {
+      end = withTime(baseDate, toVal);
+      if (end <= ts) end += 86400000;   // e.g. 22:00 → 02:00 = do ďalšieho dňa
+      minutes = Math.round((end - ts) / 60000);
+    }
+    state.activities.push({ id: uid(), ts: ts, end: end, taskId: selTask, text: text, minutes: minutes });
+    document.getElementById("act-text").value = "";
+    document.getElementById("act-from").value = ""; document.getElementById("act-to").value = ""; renderActSpan();
+    save(); renderLog(); renderOverview(); renderProjectManager(); renderAttTotals();
+    hint(minutes != null ? "Zapísané ✓ (" + minutes + " min)" : "Zapísané ✓", false);
+    document.getElementById("act-text").focus();
+  }
+  document.getElementById("act-save").addEventListener("click", saveActivity);
+  document.getElementById("act-text").addEventListener("keydown", function (e) { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveActivity(); } });
+  document.getElementById("act-from").addEventListener("keydown", function (e) { if (e.key === "Enter") saveActivity(); });
+  document.getElementById("act-to").addEventListener("keydown", function (e) { if (e.key === "Enter") saveActivity(); });
+  // live preview of the od–do span; "do" earlier than "od" = continues into the next day
+  function renderActSpan() {
+    var el = document.getElementById("act-span");
+    var dv = document.getElementById("act-date").value, f = document.getElementById("act-from").value, t = document.getElementById("act-to").value;
+    if (!f || !t) { el.textContent = ""; return; }
+    var a = hmToMin(f), b = hmToMin(t), next = b <= a; if (next) b += 1440;
+    var dur = fmtDur((b - a) * 60000);
+    if (next) {
+      var d = dv ? parseDate(dv) : new Date(); var d2 = new Date(d); d2.setDate(d.getDate() + 1);
+      var lab = function (x) { return DAY_NAMES[(x.getDay() + 6) % 7] + " " + x.getDate() + "." + (x.getMonth() + 1) + "."; };
+      el.innerHTML = '<em class="nd-badge">+1 deň</em>' + esc(lab(d) + " " + f + " → " + lab(d2) + " " + t + " · " + dur);
+    } else el.textContent = f + " → " + t + " · " + dur;
+  }
+  ["act-date", "act-from", "act-to"].forEach(function (id) { var e = document.getElementById(id); e.addEventListener("input", renderActSpan); e.addEventListener("change", renderActSpan); });
+
+  // ---- CSV ----
+  function buildCSV() {
+    var rows = [["Zakaznik","Projekt","Uloha","Stav_ulohy","Datum","Cas_od","Cas_do","Trvanie_min","Aktivita","Zaciatok_ISO","Koniec_ISO"]];
+    state.activities.slice().sort(function (a, b) { return a.ts - b.ts; }).forEach(function (a) {
+      var t = taskById(a.taskId), d = new Date(a.ts);
+      rows.push([ custOfTask(t), projNameOfTask(t), t ? t.name : "", t ? (t.done ? "hotova" : "aktivna") : "",
+        dateKey(a.ts), two(d.getHours()) + ":" + two(d.getMinutes()), a.end ? fmtTime(a.end) : "",
+        typeof a.minutes === "number" ? a.minutes : "", a.text || "", d.toISOString(), a.end ? new Date(a.end).toISOString() : "" ]);
+    });
+    return toCSV(rows);
+  }
+  function toCSV(rows) { return rows.map(function (r) { return r.map(function (c) { var v = String(c); return /[",;\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(";"); }).join("\r\n"); }
+  function buildAttCSV(month) {
+    var rows = [["Datum","Den","Prichod","Odchod","Koniec_nasledujuci_den","Useky","Pocet_usekov","Prestavky_min","Odpracovane_min","Odpracovane","Odpisane_min","Odpisane"]];
+    var LG = loggedByDay(), sw = 0, sl = 0;
+    Object.keys(state.attendance).sort().forEach(function (k) {
+      if (month && k.slice(0, 7) !== month) return;
+      var r = rec(k); if (!r) return; var c = dayCalc(k), d = parseDate(k), u = unwrapSegs(r), lg = LG[k] || 0; sw += c.work; sl += lg;
+      var first = r.segs.filter(function (x) { return x.in; })[0], lastOut = "", lastM = null;
+      r.segs.forEach(function (x, i) { if (x.out) { lastOut = x.out; lastM = u[i].out; } });
+      rows.push([k, DAY_NAMES[(d.getDay() + 6) % 7], first ? first.in : "", c.open ? "" : lastOut, lastM != null && lastM >= 1440 && !c.open ? "ano" : "",
+        r.segs.filter(function (x) { return x.in; }).map(function (x) { return x.in + "-" + (x.out || ""); }).join(", "), c.count, Math.round(c.brk), Math.round(c.work), fmtDur(c.work * 60000), Math.round(lg), fmtDur(lg * 60000)]);
+    });
+    if (month) rows.push(["Spolu", "", "", "", "", "", "", "", Math.round(sw), fmtDur(sw * 60000), Math.round(sl), fmtDur(sl * 60000)]);
+    return toCSV(rows);
+  }
+  document.getElementById("download-att-csv").addEventListener("click", function () { downloadFile("download-att-csv", "pracovny-dennik-dochadzka-" + dateKey(Date.now()) + ".csv", "﻿" + buildAttCSV(), "text/csv;charset=utf-8"); });
+  function flashBtn(id, msg) { var b = document.getElementById(id); if (!b.getAttribute("data-label")) b.setAttribute("data-label", b.textContent); b.textContent = msg; setTimeout(function () { b.textContent = b.getAttribute("data-label"); }, 2200); }
+  // downloads: in claude.ai the viewer capability, otherwise (local file) a blob link
+  var dlCap = null;
+  try { if (window.claude && window.claude.use) window.claude.use("downloads").then(function (d) { dlCap = d; }).catch(function () {}); } catch (e) {}
+  function blobDownload(name, text, type) {
+    try { var blob = new Blob([text], { type: type }); var url = URL.createObjectURL(blob); var a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 150); return true; } catch (e) { return false; }
+  }
+  function downloadFile(btnId, name, text, type) {
+    if (dlCap) {
+      dlCap.save({ filename: name, data: text }).then(function () { flashBtn(btnId, "Stiahnuté ✓"); }, function (err) {
+        var c = err && err.code; flashBtn(btnId, c === "declined" ? "Zrušené" : (c === "rate_limited" ? "Skús o chvíľu" : "Nepodarilo sa"));
+      });
+      return;
+    }
+    flashBtn(btnId, blobDownload(name, text, type) ? "Stiahnuté ✓" : "Nepodarilo sa");
+  }
+
+  document.getElementById("download-csv").addEventListener("click", function () { downloadFile("download-csv", "pracovny-dennik-aktivity-" + dateKey(Date.now()) + ".csv", "﻿" + buildCSV(), "text/csv;charset=utf-8"); });
+  document.getElementById("copy-csv").addEventListener("click", function () {
+    var csv = buildCSV();
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(csv).then(function () { flashBtn("copy-csv", "Skopírované ✓"); }).catch(function () { fallbackCopy(csv, "copy-csv"); });
+    else fallbackCopy(csv, "copy-csv");
+  });
+  function fallbackCopy(text, id) { var ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); flashBtn(id, "Skopírované ✓"); } catch (e) { flashBtn(id, "Nepodarilo sa"); } document.body.removeChild(ta); }
+
+  // ---- JSON backup ----
+  document.getElementById("export-json").addEventListener("click", function () { downloadFile("export-json", "pracovny-dennik-zaloha-" + dateKey(Date.now()) + ".json", JSON.stringify({ app: "pracovny-dennik", version: 4, exportedAt: new Date().toISOString(), data: state }, null, 2), "application/json"); });
+  document.getElementById("import-json").addEventListener("click", function () { document.getElementById("import-file").click(); });
+  document.getElementById("import-file").addEventListener("change", function (e) {
+    var file = e.target.files && e.target.files[0]; if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var parsed = JSON.parse(reader.result); var inc = parsed && parsed.data ? parsed.data : parsed;
+        if (!inc || typeof inc !== "object" || !Array.isArray(inc.activities) || !Array.isArray(inc.tasks)) throw new Error("bad");
+        var hasData = state.activities.length || state.tasks.length || Object.keys(state.attendance).length;
+        if (hasData && !window.confirm("Importom sa prepíšu súčasné dáta v tomto prehliadači. Pokračovať?")) { e.target.value = ""; return; }
+        state = normalize({ presence: inc.presence && typeof inc.presence === "object" ? inc.presence : { status: "out", since: null, segments: [] }, attendance: inc.attendance, projects: inc.projects || [], tasks: inc.tasks, activities: inc.activities, todos: inc.todos });
+        attDate = dateKey(Date.now());
+        selProject = ""; selTask = ""; save(); renderAll(); flashBtn("import-json", "Naimportované ✓");
+      } catch (err) { flashBtn("import-json", "Chybný súbor"); }
+      e.target.value = "";
+    };
+    reader.readAsText(file);
+  });
+
+  try { document.getElementById("act-date").value = activeKey(); document.getElementById("hist-new-date").value = dateKey(Date.now()); } catch (e) {}
+  renderAll(); renderNow(); setInterval(renderNow, 1000);
+})();
+</script>

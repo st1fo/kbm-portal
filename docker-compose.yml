@@ -1,0 +1,116 @@
+name: kbm-portal-demo
+x-sso: &sso
+  SSO_URL: http://portal:8000
+  SSO_INTERNAL_KEY: ${SSO_INTERNAL_KEY:?Run init.sh first}
+services:
+  portal:
+    build: ./portal
+    environment:
+      SSO_INTERNAL_KEY: ${SSO_INTERNAL_KEY:?Run init.sh first}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:?Run init.sh first}
+      COOKIE_SECURE: ${COOKIE_SECURE:-0}
+    volumes:
+      - portal_data:/data
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/auth/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  workplan-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: workplan
+      POSTGRES_USER: workplan
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run init.sh first}
+    volumes:
+      - workplan_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U workplan -d workplan]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  logbook-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: logbook
+      POSTGRES_USER: logbook
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run init.sh first}
+    volumes:
+      - logbook_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U logbook -d logbook]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  workplan-api:
+    build: ./apps/workplan/backend
+    environment:
+      <<: *sso
+      DATABASE_URL: postgresql+psycopg://workplan:${POSTGRES_PASSWORD}@workplan-db:5432/workplan
+      JWT_SECRET: ${SSO_INTERNAL_KEY}
+      TZ: Europe/Bratislava
+    depends_on:
+      workplan-db:
+        condition: service_healthy
+      portal:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+  logbook-api:
+    build: ./apps/vehicle-logbook/backend
+    environment:
+      <<: *sso
+      DATABASE_URL: postgresql+psycopg://logbook:${POSTGRES_PASSWORD}@logbook-db:5432/logbook
+      COOKIE_SECURE: ${COOKIE_SECURE:-0}
+      TZ: Europe/Bratislava
+      # Gemini is called only from this backend; the key never reaches the browser or other services.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-flash-lite}
+    depends_on:
+      logbook-db:
+        condition: service_healthy
+      portal:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+  workplan-ui:
+    build: ./apps/workplan/frontend
+    depends_on:
+      workplan-api:
+        condition: service_healthy
+    restart: unless-stopped
+  logbook-ui:
+    build: ./apps/vehicle-logbook/frontend
+    depends_on:
+      logbook-api:
+        condition: service_healthy
+    restart: unless-stopped
+  gateway:
+    image: nginx:1.28-alpine
+    ports:
+      - '${BIND_ADDRESS:-0.0.0.0}:${PORT:-8090}:80'
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      workplan-ui:
+        condition: service_started
+      logbook-ui:
+        condition: service_started
+      portal:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  portal_data:
+  workplan_data:
+  logbook_data:

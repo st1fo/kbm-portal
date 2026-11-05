@@ -1,0 +1,10 @@
+fastapi==0.121.1
+uvicorn==0.38.0
+SQLAlchemy==2.0.44
+alembic==1.17.1
+psycopg[binary]==3.2.12
+python-multipart==0.0.20
+openpyxl==3.1.5
+reportlab==4.4.4
+XlsxWriter==3.2.9
+google-genai==2.34.0
