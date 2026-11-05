@@ -6,7 +6,7 @@ mazať sa dá len nepoužitý záznam.
 """
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, func, delete
 from sqlalchemy.exc import IntegrityError
@@ -41,7 +41,7 @@ def utc(dt: datetime | None) -> datetime | None:
 
 
 def clean_name(value: str) -> str:
-    return ' '.join((value or '').split())
+    return ' '.join((value or '').replace('\x00', '').split())
 
 
 def target_user(u: User, user_id: int | None, db: Session) -> int:
@@ -499,7 +499,7 @@ class ActivityIn(BaseModel):
     @field_validator('text')
     @classmethod
     def strip(cls, v):
-        v = v.strip()
+        v = v.replace('\x00', '').strip()   # PostgreSQL neprijme NUL v texte
         if not v: raise ValueError('Napíšte, čo ste robili.')
         return v
 
@@ -611,7 +611,7 @@ class TodoIn(BaseModel):
     @field_validator('text')
     @classmethod
     def strip(cls, v):
-        v = v.strip()
+        v = v.replace('\x00', '').strip()
         if not v: raise ValueError('Napíšte text to-do.')
         return v
 
@@ -673,8 +673,8 @@ def edit_todo(tid: int, p: TodoPatch, u=Depends(current_user), db: Session = Dep
     t = own_todo(db, u, tid)
     fields = p.model_fields_set
     if p.text is not None:
-        if not p.text.strip(): raise HTTPException(422, 'Napíšte text to-do.')
-        t.text = p.text.strip()
+        if not p.text.replace('\x00', '').strip(): raise HTTPException(422, 'Napíšte text to-do.')
+        t.text = p.text.replace('\x00', '').strip()
     if 'due' in fields: t.due = p.due
     if p.priority is not None: t.priority = p.priority
     assign_todo(db, u, t, p, fields)
@@ -701,3 +701,24 @@ def clear_done_todos(user_id: int | None = None, u=Depends(current_user), db: Se
     audit_foreign(db, u, uid, 'journal.todo.clear_done', n)
     commit(db)
     return {'deleted': n}
+
+
+# ---------------------------------------------------------------- import zo starého denníka
+
+MAX_IMPORT_BYTES = 5 * 1024 * 1024
+
+
+def import_size_limit(request: Request):
+    try:
+        size = int(request.headers.get('content-length') or 0)
+    except ValueError:
+        size = 0
+    if size > MAX_IMPORT_BYTES: raise HTTPException(413, 'Súbor je väčší ako 5 MB.')
+
+
+@router.post('/import', dependencies=[Depends(import_size_limit)])
+def import_legacy(payload: dict = Body(...), dry_run: bool = True, u=Depends(current_user), db: Session = Depends(get_db)):
+    """Import JSON zálohy zo starého denníka pre prihláseného používateľa. dry_run=true (predvolené) = iba náhľad."""
+    from .journal_import import run_import
+    employee(db, u.id)  # zámok používateľa: dva súbežné importy sa neprekryjú
+    return run_import(db, u, payload, dry_run)
