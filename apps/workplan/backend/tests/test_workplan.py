@@ -4,6 +4,7 @@ os.environ.setdefault('DEMO_PASSWORD','Demo-test-only-2026')
 import io
 from datetime import date
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
@@ -12,10 +13,19 @@ from app.db import Base, get_db
 from app.models import User, AttendanceType, Attendance, LeaveRequest
 from app.main import app, login_attempts
 from app.security import hasher
+from app import portal_sso
 from openpyxl import load_workbook
 
+def fake_identity(request):
+    """Náhrada portálového SSO: identitu určí hlavička X-Test-Email (u1 je správca)."""
+    email=request.headers.get('x-test-email')
+    if not email: raise HTTPException(401,'Prihláste sa do portálu KBM.')
+    i=email[1:].split('@')[0]
+    return {'email':email,'name':'User '+i if email.endswith('@test.local') else email,'admin':email=='u1@test.local'}
+
 @pytest.fixture()
-def client():
+def client(monkeypatch):
+    monkeypatch.setattr(portal_sso,'portal_identity',fake_identity)
     url=os.getenv('TEST_DATABASE_URL','sqlite://')
     engine=create_engine(url,connect_args={'check_same_thread':False} if url=='sqlite://' else {},**({'poolclass':StaticPool} if url=='sqlite://' else {}))
     Base.metadata.drop_all(engine); Base.metadata.create_all(engine)
@@ -29,16 +39,16 @@ def client():
     with TestClient(app) as c:yield c
     app.dependency_overrides.clear();engine.dispose()
 def auth(c,i=1):
-    r=c.post('/api/auth/login',json={'email':f'u{i}@test.local','password':'password-test-123'});assert r.status_code==200
-    return {'Authorization':'Bearer '+r.json()['access_token']}
+    return {'X-Test-Email':f'u{i}@test.local'}
 def plan(**kwargs):
     p={'user_id':2,'type_id':1,'start_date':'2026-11-02','end_date':'2026-11-02','start':'08:00','end':'16:30'};p.update(kwargs);return p
 
 def test_authentication(client):
-    assert client.get('/api/auth/me').status_code in (401,403)
-    assert client.post('/api/auth/login',json={'email':'u2@test.local','password':'wrong'}).status_code==401
+    # Pôvodne JWT prihlásenie; pri SSO: bez relácie 401, neznámy účet 403, staré prihlásenie 410.
+    assert client.get('/api/auth/me').status_code==401
+    assert client.get('/api/auth/me',headers={'X-Test-Email':'nobody@test.local'}).status_code==403
     assert client.get('/api/auth/me',headers=auth(client,2)).json()['id']==2
-    assert client.get('/api/auth/me',headers={'Authorization':'Bearer broken'}).status_code==401
+    assert client.post('/api/auth/login',json={'email':'u2@test.local','password':'wrong'}).status_code==410
 
 def test_permissions_and_admin_routes(client):
     h=auth(client,2)
@@ -111,5 +121,6 @@ def test_employee_deactivation(client):
     h=auth(client);employee=auth(client,2)
     p={'name':'User 2','email':'u2@test.local','role':'employee','active':False,'daily_hours':8}
     assert client.put('/api/employees/2',headers=h,json=p).status_code==200
-    assert client.get('/api/auth/me',headers=employee).status_code==401
+    # Pôvodne 401 pre zneplatnený JWT; pri SSO portál reláciu pozná, Workplan odmietne deaktivovaný účet.
+    assert client.get('/api/auth/me',headers=employee).status_code==403
     assert client.put('/api/employees/1',headers=h,json={**p,'email':'u1@test.local'}).status_code==422

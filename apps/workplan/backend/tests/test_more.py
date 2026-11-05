@@ -6,13 +6,13 @@ def test_office_with_approval_cannot_bypass_request(client):
     assert client.put('/api/types/1',headers=h,json=p).status_code==200
     assert client.post('/api/attendance',headers=auth(client,2),json=plan()).status_code==403
 
-def test_admin_create_and_duplicate_employee(client):
+def test_admin_cannot_create_or_rename_portal_accounts(client):
+    # Pôvodne vytváranie účtov; prototyp má štyri pevné účty portálu, identitu spravuje portál.
     h=auth(client)
     p={'name':'New User','email':'new@test.local','password':'longpassword-test'}
-    assert client.post('/api/employees',headers=h,json=p).status_code==200
     assert client.post('/api/employees',headers=h,json=p).status_code==409
-    r=client.post('/api/auth/login',json={'email':p['email'],'password':p['password']});assert r.status_code==200
-    assert r.json()['user']['role']=='employee'
+    p={'name':'Renamed','email':'u2@test.local','role':'employee','active':True,'daily_hours':8}
+    assert client.put('/api/employees/2',headers=h,json=p).status_code==409
 
 def test_request_blocks_planning_and_audit(client):
     h=auth(client,2)
