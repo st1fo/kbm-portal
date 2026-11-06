@@ -59,9 +59,9 @@
     if (!groups.length) $('group-list').append(el('li', { className: 'muted', textContent: 'Zatiaľ žiadne skupiny.' }));
   }
   function renderAudit(rows) {
-    const name = slug => users.find(u => u.slug === slug)?.name || slug;
+    const name = (slug, fallback) => users.find(u => u.slug === slug)?.name || fallback || slug;
     $('audit-list').replaceChildren(...rows.slice(0, 20).map(r => el('li', {},
-      el('span', { textContent: `${name(r.actor)} ${ACTIONS[r.action] || r.action}${r.detail.slug && r.detail.slug !== r.actor ? ' · ' + name(r.detail.slug) : ''}${r.detail.name && !r.detail.slug ? ' · ' + r.detail.name : ''}` }),
+      el('span', { textContent: `${name(r.actor)} ${ACTIONS[r.action] || r.action}${r.detail.slug && r.detail.slug !== r.actor ? ' · ' + name(r.detail.slug, r.detail.name) : ''}${r.detail.name && !r.detail.slug ? ' · ' + r.detail.name : ''}` }),
       el('small', { textContent: when(r.ts) }))));
     if (!rows.length) $('audit-list').append(el('li', { className: 'muted', textContent: 'Zatiaľ bez zmien.' }));
   }

@@ -1,4 +1,4 @@
-import { Upload } from 'lucide-react';
+import { CalendarRange, FolderKanban, ListTodo, Sun, Upload } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { User } from '../api';
@@ -15,6 +15,14 @@ import { usePunchQueue } from './punchQueue';
 import { TodoCard } from './Todos';
 import './journal.css';
 
+type Tab = 'today' | 'todo' | 'projects' | 'month';
+const TABS: [Tab, string, typeof Sun, string][] = [
+  ['today', 'Dnes', Sun, 'dochádzka a aktivity'],
+  ['todo', 'To-do', ListTodo, 'čo treba spraviť'],
+  ['projects', 'Projekty', FolderKanban, 'zákazníci, úlohy, čas'],
+  ['month', 'Mesiac', CalendarRange, 'odpracované dni'],
+];
+
 /** Sekcia Denník: skutočný odpracovaný čas, aktivity na úlohách a to-do. */
 export function JournalPage({ me, users, isAdmin, notify }: { me: User; users: User[]; isAdmin: boolean; notify: (m: string) => void }) {
   const qc = useQueryClient();
@@ -29,9 +37,11 @@ export function JournalPage({ me, users, isAdmin, notify }: { me: User; users: U
   const [prefill, setPrefill] = useState<Prefill | null>(null);
   const [openTask, setOpenTask] = useState<{ id: number; nonce: number } | null>(null);
   const [importing, setImporting] = useState(false);
+  const [tab, setTabState] = useState<Tab>(() => { try { const t = sessionStorage.getItem('kbm-journal-tab'); return TABS.some(x => x[0] === t) ? t as Tab : 'today'; } catch { return 'today'; } });
+  const setTab = (t: Tab) => { setTabState(t); try { sessionStorage.setItem('kbm-journal-tab', t); } catch { /* bez úložiska */ } };
   useEffect(() => { setAttDate(null); setPrefill(null); }, [viewUid]);
   const date = attDate ?? state.data?.active_day ?? baNow().date;
-  const write = (p: Omit<Prefill, 'nonce'>) => setPrefill({ ...p, nonce: Date.now() });
+  const write = (p: Omit<Prefill, 'nonce'>) => { setPrefill({ ...p, nonce: Date.now() }); setTab('today'); };
   const viewed = users.find(u => u.id === viewUid);
   const shownError = error || q.error;
 
@@ -47,20 +57,23 @@ export function JournalPage({ me, users, isAdmin, notify }: { me: User; users: U
     {shownError && <div role="alert" className="error">{shownError}<button onClick={() => { setError(''); q.clearError(); }}>Zavrieť</button></div>}
     {state.isError && <div role="alert" className="error">Stav dochádzky sa nepodarilo načítať. <button onClick={() => void state.refetch()}>Skúsiť znova</button></div>}
     {!viewUid && <CommandBar state={state.data} queue={q.queue} problem={q.problem} skewMin={state.data?.skew_min ?? 0} onPunch={q.punch} onRetry={() => void q.retry()} />}
-    <DayCard uid={uid} date={date} setDate={d => setAttDate(d)} state={state.data} onError={onError} />
-    <div className="j-dash">
-      <div className="j-col">
-        <ActivityForm uid={uid} defaultDate={state.data?.active_day ?? baNow().date} prefill={prefill} onError={onError} />
-        <ActivityLog uid={uid} onOpenTask={id => setOpenTask({ id, nonce: Date.now() })} onError={onError} />
+    <nav className="j-tabs" aria-label="Časti denníka">
+      {TABS.map(([key, label, Icon, hint]) => <button key={key} className={tab === key ? 'on' : ''} aria-pressed={tab === key} onClick={() => setTab(key)}><Icon size={18} /><span>{label}<small>{hint}</small></span></button>)}
+    </nav>
+    {tab === 'today' && <>
+      <DayCard uid={uid} date={date} setDate={d => setAttDate(d)} state={state.data} onError={onError} />
+      <div className="j-dash">
+        <div className="j-col"><ActivityForm uid={uid} defaultDate={state.data?.active_day ?? baNow().date} prefill={prefill} onError={onError} /></div>
+        <div className="j-col"><ActivityLog uid={uid} onOpenTask={id => { setOpenTask({ id, nonce: Date.now() }); setTab('projects'); }} onError={onError} /></div>
       </div>
-      <div className="j-col">
-        <TodoCard uid={uid} onWrite={write} onError={onError} />
-        <ProjectManager uid={uid} isAdmin={isAdmin} openTask={openTask} onWrite={write} onError={onError} />
-        <MonthOverview uid={uid} month={month} setMonth={setMonth} attDate={date} setAttDate={d => setAttDate(d)} onError={onError} />
-        <ProjectStats uid={uid} month={month} />
-      </div>
-    </div>
-    {!viewUid && <div className="j-foot">
+    </>}
+    {tab === 'todo' && <div className="j-single"><TodoCard uid={uid} onWrite={write} onError={onError} /></div>}
+    {tab === 'projects' && <div className="j-dash">
+      <div className="j-col"><ProjectManager uid={uid} isAdmin={isAdmin} openTask={openTask} onWrite={write} onError={onError} /></div>
+      <div className="j-col"><ProjectStats uid={uid} month={month} /></div>
+    </div>}
+    {tab === 'month' && <div className="j-single"><MonthOverview uid={uid} month={month} setMonth={setMonth} attDate={date} setAttDate={d => setAttDate(d)} onError={onError} /></div>}
+    {!viewUid && tab === 'month' && <div className="j-foot">
       <span className="muted">Dáta Denníka sú uložené na serveri Workplanu. Pípnutia bez spojenia počkajú v prehliadači a odošlú sa neskôr.</span>
       <button className="secondary compact" onClick={() => setImporting(true)}><Upload size={15} />Importovať zo starého denníka</button>
     </div>}
