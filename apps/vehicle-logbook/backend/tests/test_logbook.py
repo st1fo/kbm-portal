@@ -15,9 +15,29 @@ sandbox = TemporaryDirectory()
 os.environ["DATABASE_URL"] = os.environ.get("LOGBOOK_TEST_DATABASE_URL") or f"sqlite:///{sandbox.name}/test.sqlite"
 os.environ["COOKIE_SECURE"] = "0"
 
+from app import portal_sso
 from app.auth import hash_password
-from app.db import Session, User
+from app.db import Access, Session, User
 from app.main import app
+
+
+def stub_identity(request):
+    """Portál nahradený: hodnota cookie = používateľ, správca je iba „tester“."""
+    from fastapi import HTTPException
+    slug = request.cookies.get("kbm_portal_session")
+    if not slug:
+        raise HTTPException(401, "Prihláste sa do portálu KBM.")
+    return {"slug": slug, "admin": slug == ADMIN["username"], "name": slug}
+
+
+def member(username, *vehicle_ids):
+    """Bežný používateľ s prístupom k vozidlám (účty sa inak zakladajú v portáli)."""
+    with Session() as db:
+        user = User(username=username, password=hash_password("x" * 16), admin=False)
+        db.add(user); db.flush()
+        db.add_all(Access(user_id=user.id, vehicle_id=v) for v in vehicle_ids)
+        db.commit()
+    return TestClient(app, cookies={"kbm_portal_session": username})
 
 D = Decimal
 ADMIN = {"username":"tester", "password":"only-for-testing"}
@@ -31,13 +51,10 @@ class LogbookTests(unittest.TestCase):
         config = Config(str(BASE / "alembic.ini"))
         command.upgrade(config, "head")
         command.check(config)
-        with Session() as db:
-            db.add(User(username=ADMIN["username"], password=hash_password(ADMIN["password"]), admin=True))
-            db.commit()
+        portal_sso.portal_identity = stub_identity
 
     def setUp(self):
-        self.client = TestClient(app)
-        self.assertEqual(self.client.post("/api/login", json=ADMIN).status_code, 200)
+        self.client = TestClient(app, cookies={"kbm_portal_session": ADMIN["username"]})
         self.addCleanup(self.client.close)
 
     def assert_status(self, response, expected=200):
@@ -83,13 +100,9 @@ class LogbookTests(unittest.TestCase):
         path = self.add_vehicle("CLOSE")
         identifier = int(path.rsplit("/",1)[1])
         self.assert_status(self.trip(path,120))
-        body = {"username":"employee", "password":"test-password-employee","vehicle_ids":[identifier]}
-        self.assert_status(self.client.post("/api/users",json=body))
         other_path = self.add_vehicle("PRIVATE")
-        with TestClient(app) as regular, TestClient(app) as anonymous:
+        with member("employee",identifier) as regular, TestClient(app) as anonymous:
             self.assertEqual(anonymous.get(path+"/records",params={"year":2024,"month":1}).status_code,401)
-            self.assertEqual(regular.post("/api/login",json={"username":"employee","password":"wrong"}).status_code,401)
-            self.assertEqual(regular.post("/api/login",json={k:body[k] for k in ("username","password")}).status_code,200)
             self.assertEqual(regular.get(other_path+"/reports",params={"year":2024}).status_code,404)
             self.assertEqual(regular.post(path+"/close",params={"month":"2024-02-01"}).status_code,403)
             self.assert_status(self.client.post(path+"/close",params={"month":"2024-02-01"}))
@@ -100,8 +113,6 @@ class LogbookTests(unittest.TestCase):
             self.assert_status(self.client.post(path+"/reopen",params={"month":"2024-02-01"}))
             self.assertTrue(self.period(path)["closed"])
             self.assertFalse(self.period(path,2)["closed"])
-            self.assertEqual(regular.post("/api/logout").status_code,200)
-            self.assertEqual(regular.get("/api/me").status_code,401)
 
     def test_export_and_formula_injection(self):
         path = self.add_vehicle("EXPORT")
@@ -181,8 +192,8 @@ class LogbookTests(unittest.TestCase):
         export = self.client.get(path+'/export',params={'year':2024,'month':1,'format':'xlsx'})
         workbook = load_workbook(io.BytesIO(export.content),read_only=True)
         sheet=workbook['Jazdy']
-        headers=[cell.value for cell in sheet[2]]
-        self.assertEqual(sheet.cell(3,headers.index('Pôvod záznamu')+1).value,'Mesačný odhad')
+        headers=[cell.value for cell in sheet[3]]
+        self.assertTrue(str(sheet.cell(4,headers.index('Pôvod záznamu')+1).value).startswith('Mesačný odhad'))
         workbook.close()
 
     def test_monthly_draft_stale_permissions_and_catalogue(self):
@@ -194,9 +205,7 @@ class LogbookTests(unittest.TestCase):
         preview = self.assert_status(self.client.post(path+'/monthly-drafts',json=body))
         self.assertEqual(len(preview['rows']),2)
         self.assertTrue(all(row['approximate_km']==100 for row in preview['rows']))
-        self.assert_status(self.client.post('/api/users',json={'username':'draft-user','password':'draft-password-123','vehicle_ids':[vehicle_id]}))
-        with TestClient(app) as other:
-            self.assertEqual(other.post('/api/login',json={'username':'draft-user','password':'draft-password-123'}).status_code,200)
+        with member('draft-user',vehicle_id) as other:
             self.assertEqual(other.post(path+f"/monthly-drafts/{preview['draft_id']}/approve",json={
                 'reviewed':True,'rows':preview['rows']}).status_code,404)
             self.assertEqual(other.post('/api/demo').status_code,403)
@@ -229,3 +238,35 @@ class LogbookTests(unittest.TestCase):
         report=self.period(path,first['month'],first['year'])
         self.assertEqual(report['distance'],1040)
         self.assertFalse([warning for row in report['rows'] for warning in row['warnings'] if 'Tachometer' in warning])
+
+    def test_delete_vehicle_with_all_data(self):
+        from sqlalchemy import func, select
+        from app.db import Audit, Closing, Destination, Fuel, MonthlyDraft, Trip, Vehicle
+        path = self.add_vehicle("DELETE")
+        identifier = int(path.rsplit("/",1)[1])
+        keep = self.add_vehicle("KEEP")
+        self.assert_status(self.trip(keep,130))
+        self.assert_status(self.client.post(path+"/destinations",json={"name":"Košice","distance":50}))
+        self.assert_status(self.client.post(path+"/fuel",json={"day":"2024-01-10","odo":180,"liters":5,"gross":9,"vat":20}))
+        body = {"month":"2024-01-01","start_odo":100,"end_odo":300,"routes":[{"destination":"Klient","count":2,"approximate_km":100}]}
+        preview = self.assert_status(self.client.post(path+"/monthly-drafts",json=body))
+        self.assert_status(self.client.post(path+f"/monthly-drafts/{preview['draft_id']}/approve",json={"rows":preview["rows"],"reviewed":True}))
+        self.assert_status(self.client.post(path+"/close",params={"month":"2024-01-01"}))
+        usage = self.assert_status(self.client.get(path+"/usage"))
+        self.assertEqual((usage["trips"],usage["fuel"],usage["destinations"],usage["drafts"]),(2,1,1,1))
+        self.assertGreaterEqual(usage["closings"],1)
+        with member("deleter",identifier) as regular:
+            self.assertEqual(regular.request("DELETE",path,json={"registration":"TEST-DELETE"}).status_code,403)
+        self.assert_status(self.client.request("DELETE",path,json={"registration":"TEST-ZLE"}),422)
+        result = self.assert_status(self.client.request("DELETE",path,json={"registration":"test-delete"}))
+        self.assertEqual(result["counts"]["trips"],2)
+        self.assertEqual(self.client.get(path+"/reports",params={"year":2024}).status_code,404)
+        with Session() as db:
+            for model in (Trip,Fuel,Destination,Closing,MonthlyDraft):
+                self.assertEqual(db.scalar(select(func.count()).select_from(model).where(model.vehicle_id == identifier)),0)
+            self.assertIsNone(db.get(Vehicle,identifier))
+            self.assertEqual(db.scalar(select(func.count()).select_from(Audit).where(Audit.vehicle_id == identifier)),0)
+            self.assertTrue(db.scalar(select(Audit).where(Audit.action == "Vozidlo zmazané")))
+        self.assertEqual(self.period(keep)["distance"],30)
+        # rovnaké EČV možno po zmazaní znova pridať
+        self.add_vehicle("DELETE")

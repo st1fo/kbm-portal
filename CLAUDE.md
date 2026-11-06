@@ -32,7 +32,7 @@ python -m pytest tests/test_sso.py::test_employee_permissions -q   # single test
 
 `apps/vehicle-logbook/backend/tests/test_assistant.py` covers the monthly assistant. It stubs `portal_identity` and Gemini, so it runs from `apps/vehicle-logbook/backend` with `python -m pytest tests/test_assistant.py -q`. The PDF check runs only when `PDF_FONT`, or the DejaVu font, exists.
 
-The other per-app test suites (`apps/*/backend/tests/`) were written before SSO. They log in through `/api/auth/login` and `/api/login`, which now return 410, so expect them to fail until they are updated to mock `portal_identity`.
+`apps/vehicle-logbook/backend/tests/test_logbook.py` (ledger, closings, exports, monthly drafts, vehicle deletion) uses the same stub; run it separately from `test_assistant.py`, because both share one SQLite DB per process. Workplan's backend test suite was written before SSO. It logs in through `/api/auth/login`, which now returns 410, so expect it to fail until it is updated to mock `portal_identity`.
 
 To build the frontends, run `npm ci && npm run build` in `apps/<app>/frontend`. Each build type-checks with `tsc` first, then runs `vite build`. Vite `base` is `/workplan/` or `/vehicle-logbook/`, and the dev server proxies `/api` to `127.0.0.1:8000`.
 

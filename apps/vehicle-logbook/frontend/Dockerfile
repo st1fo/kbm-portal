@@ -4,6 +4,7 @@ COPY package*.json .
 RUN npm ci --no-audit --no-fund
 COPY index.html tsconfig.json vite.config.ts ./
 COPY src ./src
+COPY public ./public
 RUN npm run build
 
 FROM nginx:1.28-alpine

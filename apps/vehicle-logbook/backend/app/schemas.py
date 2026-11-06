@@ -30,6 +30,9 @@ class VehicleIn(BaseModel):
             raise ValueError("Skontrolujte počiatočný stav nádrže a jeho hodnotu.")
         return self
 
+class VehicleDelete(BaseModel):
+    registration: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=30)]
+
 class TripIn(BaseModel):
     day: date
     start_odo: Odo | None = None

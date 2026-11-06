@@ -17,9 +17,10 @@ from sqlalchemy.exc import IntegrityError
 
 from . import assistant, distances, exports, importer, planner, purge
 from .auth import COOKIE, DUMMY, administrator, check_password, current_user, db_session, digest, hash_password, login
-from .db import Access, Audit, Batch, Closing, Destination, Fuel, Holiday, Login, MonthlyDraft, Trip, User, Vehicle, now
+from .db import (Access, AssistantFile, AssistantSession, Audit, Batch, Closing, Destination, Fuel, Holiday, Login,
+                 MonthlyDraft, Trip, User, Vehicle, now)
 from .ledger import events, ledger, month_of, months, next_month, report, rounded
-from .schemas import Credentials, DestinationIn, FuelIn, TripIn, UserIn, VehicleIn, MonthlyPlanIn, MonthlyApproval
+from .schemas import Credentials, DestinationIn, FuelIn, TripIn, UserIn, VehicleIn, VehicleDelete, MonthlyPlanIn, MonthlyApproval
 
 app = FastAPI(title="Kniha jázd", docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(assistant.router)
@@ -117,7 +118,7 @@ def sign_out(request: Request, response: Response, db=Db):
 
 @app.get("/api/me")
 def me(user=Member):
-    return {"id":user.id,"username":user.username,"admin":user.admin}
+    return {"id":user.id,"username":user.username,"name":getattr(user,"display_name",user.username),"admin":user.admin}
 
 @app.get("/api/vehicles")
 def vehicles(db=Db,user=Member):
@@ -151,6 +152,36 @@ def save_vehicle(data: VehicleIn, identifier: int | None = None, db=Db,user=Admi
     audit(db,user,"Vozidlo uložené",vehicle.id,before=before,after=serialized(vehicle))
     db.commit()
     return json_value(serialized(vehicle))
+
+VEHICLE_DATA = (("trips", Trip), ("fuel", Fuel), ("destinations", Destination), ("closings", Closing),
+                ("drafts", MonthlyDraft), ("assistant", AssistantSession))
+
+def vehicle_usage(db, identifier):
+    return {name: db.scalar(select(func.count()).select_from(model).where(model.vehicle_id == identifier)) or 0
+            for name, model in VEHICLE_DATA}
+
+@app.get("/api/vehicles/{identifier}/usage")
+def usage(identifier: int, db=Db, user=Admin):
+    vehicle_for(db, user, identifier)
+    return vehicle_usage(db, identifier)
+
+@app.delete("/api/vehicles/{identifier}")
+def delete_vehicle(identifier: int, data: VehicleDelete, db=Db, user=Admin):
+    """Natrvalo zmaže vozidlo so všetkými jazdami, tankovaniami, cieľmi, uzávierkami, návrhmi, bločkami a históriou."""
+    vehicle = vehicle_for(db, user, identifier, True)
+    if data.registration.upper() != vehicle.registration.upper():
+        fail("Pre potvrdenie zadajte presne EČV vozidla.")
+    counts = vehicle_usage(db, identifier)
+    run = lambda statement: db.execute(statement.execution_options(synchronize_session=False))
+    sessions = select(AssistantSession.id).where(AssistantSession.vehicle_id == identifier)
+    run(delete(AssistantFile).where(AssistantFile.session_id.in_(sessions)))
+    # jazdy a tankovania odkazujú na mesačné návrhy, preto idú prvé
+    for model in (AssistantSession, Trip, Fuel, MonthlyDraft, Destination, Holiday, Closing, Batch, Access, Audit):
+        run(delete(model).where(model.vehicle_id == identifier))
+    run(delete(Vehicle).where(Vehicle.id == identifier))
+    audit(db, user, "Vozidlo zmazané", None, registration=vehicle.registration, name=vehicle.name, counts=counts)
+    db.commit()
+    return {"ok": True, "counts": counts}
 
 @app.get("/api/vehicles/{identifier}/records")
 def records(identifier: int, year: int=Query(ge=1900,le=9998), month: int=Query(ge=1,le=12),db=Db,user=Member):
@@ -273,13 +304,17 @@ def destinations(vehicle_id: int,db=Db,user=Member):
 def save_destination(vehicle_id: int,data: DestinationIn,identifier: int | None=None,db=Db,user=Member):
     vehicle = vehicle_for(db,user,vehicle_id,True)
     values = data.model_dump()
+    before = None
     if identifier is None:
         row = Destination(vehicle_id=vehicle.id,**values)
         db.add(row)
     else:
         row = row_for(db,Destination,vehicle,identifier)
+        before = serialized(row)
         for key,value in values.items():
             setattr(row,key,value)
+    db.flush()
+    audit(db,user,"Cieľ uložený",vehicle.id,before=before,after=serialized(row))
     db.commit()
     return serialized(row)
 
