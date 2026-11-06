@@ -36,4 +36,4 @@
 .tour-buttons{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .tour-skip{background:none;border:0;color:#6b766f;font-size:14px;text-decoration:underline;padding:6px 0;margin-right:auto}
 .tour-count{font-size:13px;color:#8a948e}.tour-skip+.tour-count{margin-right:4px}.tour-buttons>.tour-count:first-child{margin-right:auto}
-@media(max-width:640px){.portal-link{padding:8px 11px;font-size:13px}}
+@media(max-width:640px){.portal-link{padding:0;width:38px;height:38px;justify-content:center;gap:0}.portal-link span{display:none}.portal-link svg{width:20px;height:20px}}
