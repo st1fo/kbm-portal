@@ -16,7 +16,7 @@ export function tourSteps(isAdmin: boolean): TourStep[] {
     { page: 'calendar', target: 'plan', title: 'Naplánovať deň', text: 'Kancelária, práca z domu, aj viac dní naraz. Dovolenka či PN sa odošle ako žiadosť na schválenie.' },
     { page: 'calendar', target: 'teams', title: 'Výber tímu', text: 'Zobrazí iba ľudí z vybraného tímu. Výber si Workplan zapamätá.' },
     { page: 'journal', target: 'punch', title: 'Denník: príchod a odchod', text: 'Keď prídete do práce, pípnite príchod, pri odchode odchod. Funguje aj bez internetu, pípnutie sa odošle neskôr.' },
-    { page: 'journal', target: 'journal-tabs', title: 'Na čom robíte', text: 'V záložke Dnes zapíšete, na čom ste robili. To-do je váš zoznam úloh, Mesiac ukazuje odpracované dni.' },
+    { page: 'journal', target: 'journal-tabs', title: 'Na čom robíte', text: 'V záložke Dnes zapíšete, na čom ste robili. Nástenky sú úlohy na kartách, ktoré preťahujete medzi stĺpcami (aj tímové), Mesiac ukazuje odpracované dni.' },
     { page: 'requests', target: 'nav-requests', title: 'Žiadosti o voľno', text: isAdmin
       ? 'Tu schvaľujete dovolenky a iné neprítomnosti tímu. Nové žiadosti uvidíte aj pri zvončeku.'
       : 'Tu požiadate o dovolenku alebo voľno a uvidíte, či je schválené. O výsledku vám príde správa pri zvončeku.' },

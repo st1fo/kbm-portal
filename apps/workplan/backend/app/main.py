@@ -14,11 +14,13 @@ from .schemas import Login, Employee, TypeInput, Plan, Review, SettingsInput, Ho
 from .security import current_user, admin, token, hasher
 from .common import TZ, today, row, audit, commit, owner, employee, days, month_bounds, get_settings, working_dates
 from .journal import router as journal_router
+from .boards import router as boards_router
 from .purge import router as purge_router
 from .directory import visible_user_ids, group_names, restrict_to_group
 
 app = FastAPI(title='KBM Workplan API',version='1.0.0')
 app.include_router(journal_router)
+app.include_router(boards_router)
 app.include_router(purge_router)
 login_attempts=defaultdict(deque)
 def notify_admins(db,message):

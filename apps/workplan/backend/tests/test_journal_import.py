@@ -69,8 +69,12 @@ def test_preview_then_import_then_idempotent(client, clock):
     assert acts['osirotená']['task_id'] is None and acts['osirotená']['minutes'] == 20
     tasks = {t['name']: t for t in client.get('/api/journal/tasks', headers=h).json()}
     assert set(tasks) == {'Migrácia VM', 'Telefonát'} and tasks['Telefonát']['done'] and tasks['Telefonát']['customer'] == 'ACME'
-    todos = {t['text']: t for t in client.get('/api/journal/todos', headers=h).json()}
+    board = client.get('/api/journal/boards', headers=h).json()[0]
+    full = client.get(f"/api/journal/boards/{board['id']}", headers=h).json()
+    cols = {c['id']: c for c in full['columns']}
+    todos = {t['title']: t for t in full['cards']}
     assert todos['Zavolať']['priority'] == 2 and todos['Zavolať']['customer'] == 'ACME' and todos['Zavolať']['due'] == '2026-11-06'
+    assert not cols[todos['Zavolať']['column_id']]['is_done'] and cols[todos['Nasadiť']['column_id']]['is_done']
     assert todos['Nasadiť']['done_at'].startswith('2026-11-04T15:00') and todos['Nasadiť']['project'] == 'Web'
     assert 'journal.import' in [a['action'] for a in client.get('/api/audit', headers=auth(client)).json()]
 

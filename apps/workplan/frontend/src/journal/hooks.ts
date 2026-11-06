@@ -24,7 +24,9 @@ export const useTasks = (uid: number | null, all = false) => useQuery({ queryKey
 export const useRecentActivities = (uid: number | null) => useQuery({ queryKey: ['journal', 'activities', uid, 'recent'], queryFn: () => journalApi.activities({ limit: 600 }, uid) });
 export const useTaskActivities = (taskId: number, uid: number | null) =>
   useQuery({ queryKey: ['journal', 'activities', uid, 'task', taskId], queryFn: () => journalApi.activities({ task_id: taskId, limit: 5000 }, uid) });
-export const useTodos = (uid: number | null) => useQuery({ queryKey: ['journal', 'todos', uid], queryFn: () => journalApi.todos(uid) });
+export const useBoards = (uid: number | null) => useQuery({ queryKey: ['journal', 'boards', uid], queryFn: () => journalApi.boards(uid) });
+export const useBoard = (id: number | null, poll: number | false) =>
+  useQuery({ queryKey: ['journal', 'board', id], queryFn: () => journalApi.board(id!), enabled: id != null, refetchInterval: poll, refetchIntervalInBackground: false });
 export const useProjectStats = (range: { start: string; end: string } | null, uid: number | null) =>
   useQuery({ queryKey: ['journal', 'projectStats', uid, range?.start ?? 'all'], queryFn: () => journalApi.projectStats(range, uid) });
 

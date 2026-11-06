@@ -4,7 +4,7 @@ import { Dialog } from '../components/ui/dialog';
 import type { ImportResult } from './api';
 import { journalApi } from './api';
 
-const LABELS: [keyof ImportResult['created'], string][] = [['days', 'Dni dochádzky'], ['segments', 'Úseky'], ['customers', 'Zákazníci'], ['projects', 'Projekty'], ['tasks', 'Úlohy'], ['activities', 'Aktivity'], ['todos', 'To-do']];
+const LABELS: [keyof ImportResult['created'], string][] = [['days', 'Dni dochádzky'], ['segments', 'Úseky'], ['customers', 'Zákazníci'], ['projects', 'Projekty'], ['tasks', 'Úlohy'], ['activities', 'Aktivity'], ['todos', 'Karty (to-do)']];
 
 /** Import JSON zálohy zo starého Pracovného denníka: najprv náhľad (dry run), potom potvrdenie. */
 export function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone: (msg: string) => void }) {
@@ -32,7 +32,7 @@ export function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone:
       const r = await journalApi.importLegacy(payload, false);
       await qc.invalidateQueries({ queryKey: ['journal'] });
       const n = Object.values(r.created).reduce((a, b) => a + b, 0) - r.created.segments;
-      onDone(n ? `Import dokončený: pribudlo ${r.created.days} dní, ${r.created.activities} aktivít, ${r.created.todos} to-do.` : 'Import dokončený: nič nové, všetko už bolo naimportované.');
+      onDone(n ? `Import dokončený: pribudlo ${r.created.days} dní, ${r.created.activities} aktivít, ${r.created.todos} kariet na nástenku.` : 'Import dokončený: nič nové, všetko už bolo naimportované.');
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   }

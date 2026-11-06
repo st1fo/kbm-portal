@@ -1,4 +1,4 @@
-"""Denník: skutočný odpracovaný čas (úseky), zdieľané zákazníky/projekty/úlohy, aktivity a to-do.
+"""Denník: skutočný odpracovaný čas (úseky), zdieľané zákazníky/projekty/úlohy, aktivity; nástenky úloh sú v boards.py.
 
 Oprávnenia: dochádzka, aktivity a to-do sú osobné (zamestnanec iba svoje, admin všetko + audit).
 Zákazníkov, projekty a úlohy vytvára a upravuje každý aktívny používateľ; deaktivuje a maže iba admin,
@@ -12,7 +12,7 @@ from sqlalchemy import select, func, delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from .db import get_db
-from .models import User, Customer, Project, Task, WorkDay, WorkSegment, Activity, Todo, WorkPunch, name_key
+from .models import User, Customer, Project, Task, WorkDay, WorkSegment, Activity, Card, WorkPunch, name_key
 from .security import current_user
 from .common import TZ, audit, commit, owner, employee, month_bounds, get_settings, days as date_range
 from .models import Holiday
@@ -322,7 +322,7 @@ def delete_customer(cid: int, u=Depends(current_user), db: Session = Depends(get
     require_admin(u)
     c = db.get(Customer, cid)
     if not c: raise HTTPException(404, 'Zákazník neexistuje.')
-    used = any(db.scalar(select(func.count()).select_from(m).where(m.customer_id == cid)) for m in (Project, Task, Todo))
+    used = any(db.scalar(select(func.count()).select_from(m).where(m.customer_id == cid)) for m in (Project, Task, Card))
     if used: raise HTTPException(409, 'Zákazník sa používa v projektoch, úlohách alebo to-do. Namiesto zmazania ho deaktivujte.')
     db.delete(c)
     audit(db, u, 'journal.customer.delete', c.name)
@@ -392,7 +392,7 @@ def delete_project(pid: int, u=Depends(current_user), db: Session = Depends(get_
     require_admin(u)
     obj = db.get(Project, pid)
     if not obj: raise HTTPException(404, 'Projekt neexistuje.')
-    if any(db.scalar(select(func.count()).select_from(m).where(m.project_id == pid)) for m in (Task, Todo)):
+    if any(db.scalar(select(func.count()).select_from(m).where(m.project_id == pid)) for m in (Task, Card)):
         raise HTTPException(409, 'Projekt má úlohy alebo to-do. Namiesto zmazania ho deaktivujte.')
     db.delete(obj)
     audit(db, u, 'journal.project.delete', obj.name)
@@ -597,111 +597,6 @@ def delete_activity(aid: int, u=Depends(current_user), db: Session = Depends(get
     audit_foreign(db, u, a.user_id, 'journal.activity.delete', {'id': aid})
     commit(db)
     return {'ok': True}
-
-
-# ---------------------------------------------------------------- to-do
-
-class TodoIn(BaseModel):
-    text: str = Field(min_length=1, max_length=500)
-    due: date | None = None
-    priority: int = Field(default=0, ge=0, le=2)
-    project_id: int | None = None
-    customer_id: int | None = None
-    customer_name: str | None = Field(default=None, max_length=150)
-
-    @field_validator('text')
-    @classmethod
-    def strip(cls, v):
-        v = v.replace('\x00', '').strip()
-        if not v: raise ValueError('Napíšte text to-do.')
-        return v
-
-
-class TodoPatch(BaseModel):
-    text: str | None = Field(default=None, min_length=1, max_length=500)
-    due: date | None = None
-    priority: int | None = Field(default=None, ge=0, le=2)
-    project_id: int | None = None
-    customer_id: int | None = None
-    customer_name: str | None = Field(default=None, max_length=150)
-    done: bool | None = None
-
-
-def todo_out(t, customers, projects):
-    p = projects.get(t.project_id)
-    c = customers.get(t.customer_id)
-    done_at = local(t.done_at)
-    return {'id': t.id, 'user_id': t.user_id, 'text': t.text, 'due': t.due.isoformat() if t.due else None, 'priority': t.priority,
-            'project_id': t.project_id, 'project': p.name if p else '', 'project_customer': (customers[p.customer_id].name if p and p.customer_id in customers else ''),
-            'customer_id': t.customer_id, 'customer': c.name if c else '', 'done': done_at is not None,
-            'done_at': done_at.isoformat() if done_at else None, 'created_at': local(t.created_at).isoformat()}
-
-
-def assign_todo(db, u, t, p, fields):
-    if p.project_id is not None:
-        t.project_id, t.customer_id = check_project(db, p.project_id), None
-    elif fields & {'project_id', 'customer_id', 'customer_name'}:
-        t.project_id, t.customer_id = None, resolve_customer(db, u, p.customer_id, p.customer_name)
-
-
-@router.get('/todos')
-def todos(user_id: int | None = None, u=Depends(current_user), db: Session = Depends(get_db)):
-    uid = target_user(u, user_id, db)
-    customers_, projects_, _ = catalog(db)
-    return [todo_out(t, customers_, projects_) for t in db.scalars(select(Todo).where(Todo.user_id == uid).order_by(Todo.created_at, Todo.id))]
-
-
-@router.post('/todos')
-def add_todo(p: TodoIn, user_id: int | None = None, u=Depends(current_user), db: Session = Depends(get_db)):
-    uid = target_user(u, user_id, db)
-    t = Todo(user_id=uid, text=p.text, due=p.due, priority=p.priority)
-    assign_todo(db, u, t, p, p.model_fields_set)
-    db.add(t)
-    audit_foreign(db, u, uid, 'journal.todo.create', p.text)
-    commit(db)
-    return todo_out(t, *catalog(db)[:2])
-
-
-def own_todo(db, u, tid):
-    t = db.get(Todo, tid)
-    if not t: raise HTTPException(404, 'To-do neexistuje.')
-    owner(u, t.user_id)
-    return t
-
-
-@router.patch('/todos/{tid}')
-def edit_todo(tid: int, p: TodoPatch, u=Depends(current_user), db: Session = Depends(get_db)):
-    t = own_todo(db, u, tid)
-    fields = p.model_fields_set
-    if p.text is not None:
-        if not p.text.replace('\x00', '').strip(): raise HTTPException(422, 'Napíšte text to-do.')
-        t.text = p.text.replace('\x00', '').strip()
-    if 'due' in fields: t.due = p.due
-    if p.priority is not None: t.priority = p.priority
-    assign_todo(db, u, t, p, fields)
-    if p.done is not None and p.done != (t.done_at is not None):
-        t.done_at = utc(now()) if p.done else None
-    audit_foreign(db, u, t.user_id, 'journal.todo.update', {'id': tid})
-    commit(db)
-    return todo_out(t, *catalog(db)[:2])
-
-
-@router.delete('/todos/{tid}')
-def delete_todo(tid: int, u=Depends(current_user), db: Session = Depends(get_db)):
-    t = own_todo(db, u, tid)
-    db.delete(t)
-    audit_foreign(db, u, t.user_id, 'journal.todo.delete', {'id': tid})
-    commit(db)
-    return {'ok': True}
-
-
-@router.post('/todos/clear-done')
-def clear_done_todos(user_id: int | None = None, u=Depends(current_user), db: Session = Depends(get_db)):
-    uid = target_user(u, user_id, db)
-    n = db.execute(delete(Todo).where(Todo.user_id == uid, Todo.done_at.is_not(None))).rowcount
-    audit_foreign(db, u, uid, 'journal.todo.clear_done', n)
-    commit(db)
-    return {'deleted': n}
 
 
 # ---------------------------------------------------------------- prehľady

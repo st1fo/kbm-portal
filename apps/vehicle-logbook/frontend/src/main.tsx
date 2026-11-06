@@ -9,17 +9,28 @@ import { api, errorText, fmt, localDay, monthName, type Account, type Entry, typ
 import { DeleteVehicleDialog, destinationFields, fuelFields, RecordDialog, tripFields, UserDialog, vehicleFields, type Edit } from './forms';
 import { Icon } from './icons';
 import { MonthlyWizard } from './MonthlyWizard';
+import { nextTheme, themeLabels, useTheme, type ThemeMode, type ThemePref } from './theme';
 import './style.css';
 
-const theme = createTheme({
-  palette:{primary:{main:'#326c56'},secondary:{main:'#e7b45f'},error:{main:'#b93a32'},
-    background:{default:'#f3f5f3',paper:'#fff'},text:{primary:'#1f2a25',secondary:'#5d6b63'}},
+const makeTheme = (mode: ThemeMode) => { const dark = mode==='dark'; return createTheme({
+  palette:{mode,primary:{main:dark?'#6cc19e':'#326c56'},secondary:{main:'#e7b45f'},error:{main:dark?'#f08178':'#b93a32'},
+    background:{default:dark?'#161a19':'#f3f5f3',paper:dark?'#202523':'#fff'},text:{primary:dark?'#e6ece8':'#1f2a25',secondary:dark?'#9aa69f':'#5d6b63'},
+    ...(dark?{divider:'#353d39'}:{})},
   shape:{borderRadius:10},
   typography:{fontFamily:'Inter, system-ui, -apple-system, "Segoe UI", sans-serif',button:{textTransform:'none',fontWeight:650}},
   components:{MuiPaper:{styleOverrides:{root:{backgroundImage:'none'}}},
     MuiButton:{defaultProps:{disableElevation:true}},
-    MuiTableCell:{styleOverrides:{head:{fontWeight:700,background:'#f0f3f1',color:'#4c5a52'}}}},
-});
+    MuiTableCell:{styleOverrides:{head:{fontWeight:700,background:dark?'#1d2220':'#f0f3f1',color:dark?'#b8c2bc':'#4c5a52'}}}},
+}); };
+const themes = { light: makeTheme('light'), dark: makeTheme('dark') };
+
+/** Prepínač vzhľadu v hornom pruhu: svetlý → tmavý → automaticky (podľa systému). */
+function ThemeToggle({ pref, setPref }: { pref: ThemePref; setPref: (p: ThemePref) => void }) {
+  const icon = pref==='light' ? 'sun' : pref==='dark' ? 'moon' : 'monitor';
+  return <Tooltip title={`Vzhľad: ${themeLabels[pref]} (kliknutím prepnete na ${themeLabels[nextTheme[pref]]})`}>
+    <IconButton className="theme-toggle" aria-label={'Vzhľad: '+themeLabels[pref]} onClick={()=>setPref(nextTheme[pref])}><Icon name={icon}/></IconButton>
+  </Tooltip>;
+}
 
 type NavItem = { url: string; label: string; icon: string; admin?: boolean; context?: boolean };
 const NAV: NavItem[] = [
@@ -136,7 +147,8 @@ const SELECTION='kbm-logbook-selection';
 function storedSelection():{vehicleId?:number;year?:number;month?:number} {
   try { return JSON.parse(sessionStorage.getItem(SELECTION)||'{}'); } catch { return {}; }
 }
-function Workspace({account,signOut}:{account:Account;signOut:()=>void}) {
+type ThemeProps = { themePref: ThemePref; setThemePref: (p: ThemePref) => void };
+function Workspace({account,signOut,themePref,setThemePref}:{account:Account;signOut:()=>void}&ThemeProps) {
   const navigate=useNavigate();
   const location=useLocation();
   const phone=useMediaQuery('(max-width:700px)');
@@ -489,6 +501,7 @@ function Workspace({account,signOut}:{account:Account;signOut:()=>void}) {
       <nav aria-label="Hlavné menu">{NAV.filter(item=>!item.admin||account.admin).map(item=>
         <NavLink key={item.url} to={item.url} end={item.url==='/'} onClick={()=>setSearch('')}><Icon name={item.icon} size={17}/>{item.label}</NavLink>)}</nav>
       <div className="account">
+        <ThemeToggle pref={themePref} setPref={setThemePref}/>
         <span className="avatar" title={account.name??account.username}>{initials}</span>
         <span className="account-name">{account.name??account.username}<small>{account.admin?'Správca':'Používateľ'}</small></span>
         <Tooltip title="Odhlásiť"><IconButton className="logout" onClick={signOut} aria-label="Odhlásiť"><Icon name="logout"/></IconButton></Tooltip>
@@ -546,7 +559,7 @@ function Workspace({account,signOut}:{account:Account;signOut:()=>void}) {
     </Snackbar>
   </div>;
 }
-function App() {
+function App({ themePref, setThemePref }: ThemeProps) {
   const [account,setAccount]=useState<Account|null>();
   const [problem,setProblem]=useState('');
   useEffect(()=>{
@@ -560,9 +573,13 @@ function App() {
   },[]);
   if (!account) return <div className="spinner full"><CircularProgress /></div>;
   return <>{problem&&<Alert severity="error" onClose={()=>setProblem('')}>{problem}</Alert>}
-    <Workspace account={account} signOut={()=>{
+    <Workspace account={account} themePref={themePref} setThemePref={setThemePref} signOut={()=>{
       void fetch('/auth/logout',{method:'POST'}).then(()=>window.location.assign('/')).catch(error=>setProblem(errorText(error)));
     }}/></>;
 }
-createRoot(document.getElementById('root')!).render(<ThemeProvider theme={theme}><CssBaseline/>
-  <BrowserRouter basename="/vehicle-logbook"><App/></BrowserRouter></ThemeProvider>);
+function Root() {
+  const [pref,setPref,mode]=useTheme();
+  return <ThemeProvider theme={themes[mode]}><CssBaseline/>
+    <BrowserRouter basename="/vehicle-logbook"><App themePref={pref} setThemePref={setPref}/></BrowserRouter></ThemeProvider>;
+}
+createRoot(document.getElementById('root')!).render(<Root/>);

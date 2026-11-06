@@ -26,14 +26,20 @@ export type Activity = {
   customer: string; date: string; start: string; end: string | null; end_next_day: boolean; minutes: number | null; text: string;
   start_at: string; end_at: string | null;
 };
-export type Todo = {
-  id: number; user_id: number; text: string; due: string | null; priority: number; project_id: number | null; project: string;
-  project_customer: string; customer_id: number | null; customer: string; done: boolean; done_at: string | null; created_at: string;
+export type CheckItem = { id: number; text: string; done: boolean };
+export type Card = {
+  id: number; board_id: number; column_id: number; position: number; title: string; description: string; due: string | null; priority: number;
+  project_id: number | null; project: string; project_customer: string; customer_id: number | null; customer: string;
+  assignee_ids: number[]; checklist: CheckItem[]; done_at: string | null; created_by: number | null; created_at: string;
 };
+export type BoardColumn = { id: number; name: string; position: number; is_done: boolean };
+export type BoardSummary = { id: number; name: string; color: string; owner_id: number; member_ids: number[]; team: boolean; open: number; late: number; mine: number };
+export type BoardFull = BoardSummary & { members: { id: number; name: string }[]; can_manage: boolean; columns: BoardColumn[]; cards: Card[] };
+export type CardInput = Partial<{ title: string; description: string; due: string | null; priority: number; assignee_ids: number[] }> & Assign;
 export type ProjectStat = { project_id: number | null; project: string; customer: string; minutes: number; count: number };
 export type ImportCounts = Record<'days' | 'segments' | 'customers' | 'projects' | 'tasks' | 'activities' | 'todos', number>;
 export type ImportResult = { dry_run: boolean; created: ImportCounts; skipped: ImportCounts; warnings: string[] };
-/** Priradenie to-do: projekt, existujúci zákazník alebo nový zákazník podľa názvu. */
+/** Priradenie karty: projekt, existujúci zákazník alebo nový zákazník podľa názvu. */
 export type Assign = { project_id?: number | null; customer_id?: number | null; customer_name?: string | null };
 
 /** user_id do query: null = prihlásený používateľ (admin môže prezerať iného zamestnanca). */
@@ -66,11 +72,24 @@ export const journalApi = {
   addActivity: (data: ActivityInput, uid: number | null) => api<Activity>(withUser(j('/activities'), uid), 'POST', data),
   editActivity: (id: number, data: ActivityInput) => api<Activity>(j('/activities/' + id), 'PUT', data),
   deleteActivity: (id: number) => api(j('/activities/' + id), 'DELETE'),
-  todos: (uid: number | null) => api<Todo[]>(withUser(j('/todos'), uid)),
-  addTodo: (data: { text: string; due: string | null; priority: number } & Assign, uid: number | null) => api<Todo>(withUser(j('/todos'), uid), 'POST', data),
-  editTodo: (id: number, data: Partial<{ text: string; due: string | null; priority: number; done: boolean }> & Assign) => api<Todo>(j('/todos/' + id), 'PATCH', data),
-  deleteTodo: (id: number) => api(j('/todos/' + id), 'DELETE'),
-  clearDoneTodos: (uid: number | null) => api<{ deleted: number }>(withUser(j('/todos/clear-done'), uid), 'POST'),
+  boards: (uid: number | null) => api<BoardSummary[]>(withUser(j('/boards'), uid)),
+  board: (id: number) => api<BoardFull>(j('/boards/' + id)),
+  addBoard: (data: { name: string; color: string; member_ids: number[] }) => api<BoardFull>(j('/boards'), 'POST', data),
+  editBoard: (id: number, data: Partial<{ name: string; color: string; member_ids: number[] }>) => api<BoardFull>(j('/boards/' + id), 'PATCH', data),
+  deleteBoard: (id: number) => api(j('/boards/' + id), 'DELETE'),
+  leaveBoard: (id: number) => api(j('/boards/' + id + '/leave'), 'POST'),
+  addColumn: (bid: number, name: string) => api<BoardFull>(j(`/boards/${bid}/columns`), 'POST', { name }),
+  editColumn: (id: number, data: Partial<{ name: string; is_done: boolean }>) => api<BoardFull>(j('/columns/' + id), 'PATCH', data),
+  moveColumn: (id: number, index: number) => api<BoardFull>(j(`/columns/${id}/move`), 'POST', { index }),
+  deleteColumn: (id: number) => api<BoardFull>(j('/columns/' + id), 'DELETE'),
+  clearColumn: (id: number) => api<{ deleted: number }>(j(`/columns/${id}/clear`), 'POST'),
+  addCard: (bid: number, data: CardInput & { column_id: number; title: string; top?: boolean }) => api<Card>(j(`/boards/${bid}/cards`), 'POST', data),
+  editCard: (id: number, data: CardInput) => api<Card>(j('/cards/' + id), 'PATCH', data),
+  moveCard: (id: number, column_id: number, index: number) => api<Card>(j(`/cards/${id}/move`), 'POST', { column_id, index }),
+  deleteCard: (id: number) => api(j('/cards/' + id), 'DELETE'),
+  addItem: (cid: number, text: string) => api<Card>(j(`/cards/${cid}/checklist`), 'POST', { text }),
+  editItem: (id: number, data: Partial<{ text: string; done: boolean }>) => api<Card>(j('/checklist/' + id), 'PATCH', data),
+  deleteItem: (id: number) => api<Card>(j('/checklist/' + id), 'DELETE'),
   importLegacy: (payload: unknown, dryRun: boolean) => api<ImportResult>(j('/import?dry_run=' + dryRun), 'POST', payload),
 };
 export type ActivityInput = { task_id: number; date: string; start: string | null; end: string | null; text: string };

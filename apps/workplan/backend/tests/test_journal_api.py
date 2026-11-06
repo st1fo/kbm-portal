@@ -136,21 +136,6 @@ def test_activities_span_overnight_and_ownership(client, clock):
     assert 'journal.activity.delete' in audit_actions(client)
 
 
-def test_todos(client, clock):
-    h = auth(client, EMP)
-    pid = client.post('/api/journal/projects', headers=h, json={'name': 'Web'}).json()['id']
-    t = client.post('/api/journal/todos', headers=h, json={'text': 'Zavolať dodávateľovi', 'due': '2026-11-06', 'priority': 2, 'customer_name': 'ACME'}).json()
-    assert t['customer'] == 'ACME' and t['priority'] == 2 and not t['done']
-    t2 = client.post('/api/journal/todos', headers=h, json={'text': 'Nasadiť', 'project_id': pid}).json()
-    assert client.post('/api/journal/todos', headers=h, json={'text': 'x', 'priority': 3}).status_code == 422
-    d = client.patch(f"/api/journal/todos/{t['id']}", headers=h, json={'done': True, 'due': None, 'project_id': pid}).json()
-    assert d['done'] and d['done_at'].startswith('2026-11-05T08:00') and d['due'] is None and d['project'] == 'Web' and d['customer'] == ''
-    assert client.patch(f"/api/journal/todos/{t2['id']}", headers=auth(client, OTHER), json={'done': True}).status_code == 403
-    assert client.post('/api/journal/todos/clear-done', headers=h).json() == {'deleted': 1}
-    assert [x['text'] for x in client.get('/api/journal/todos', headers=h).json()] == ['Nasadiť']
-    assert client.get('/api/journal/todos', headers=auth(client, OTHER)).json() == []
-
-
 def test_overview_and_project_stats(client, clock):
     h = auth(client, EMP)
     client.put('/api/holidays', headers=auth(client), json={'date': '2026-11-17', 'name': 'Sviatok test'})

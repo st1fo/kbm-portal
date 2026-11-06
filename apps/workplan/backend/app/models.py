@@ -137,18 +137,53 @@ class Activity(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     __table_args__ = (CheckConstraint('minutes IS NULL OR minutes >= 0', name='ck_activities_minutes'), CheckConstraint('end_at IS NULL OR end_at > start_at', name='ck_activities_span'), Index('ix_activities_user_start','user_id','start_at'))
-class Todo(Base):
-    __tablename__ = 'todos'
+class Board(Base):
+    """Nástenka úloh (kanban). Bez ďalších členov je osobná, s členmi tímová."""
+    __tablename__ = 'boards'
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True)
-    text: Mapped[str] = mapped_column(String(500))
+    name: Mapped[str] = mapped_column(String(100))
+    color: Mapped[str] = mapped_column(String(7), default='#326c56')
+    owner_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+class BoardMember(Base):
+    __tablename__ = 'board_members'
+    board_id: Mapped[int] = mapped_column(ForeignKey('boards.id', ondelete='CASCADE'), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), primary_key=True, index=True)
+class BoardColumn(Base):
+    __tablename__ = 'board_columns'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    board_id: Mapped[int] = mapped_column(ForeignKey('boards.id', ondelete='CASCADE'), index=True)
+    name: Mapped[str] = mapped_column(String(60))
+    position: Mapped[int]
+    is_done: Mapped[bool] = mapped_column(default=False)
+class Card(Base):
+    __tablename__ = 'cards'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    board_id: Mapped[int] = mapped_column(ForeignKey('boards.id', ondelete='CASCADE'), index=True)
+    column_id: Mapped[int] = mapped_column(ForeignKey('board_columns.id', ondelete='CASCADE'), index=True)
+    position: Mapped[int]
+    title: Mapped[str] = mapped_column(String(500))
+    description: Mapped[str] = mapped_column(String(5000), default='')
     due: Mapped[DateType | None]
     priority: Mapped[int] = mapped_column(SmallInteger, default=0)
     project_id: Mapped[int | None] = mapped_column(ForeignKey('projects.id'))
     customer_id: Mapped[int | None] = mapped_column(ForeignKey('customers.id'))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey('users.id'))
     done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    __table_args__ = (CheckConstraint('priority >= 0 AND priority <= 2', name='ck_todos_priority'), CheckConstraint('project_id IS NULL OR customer_id IS NULL', name='ck_todos_project_or_customer'))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    __table_args__ = (CheckConstraint('priority >= 0 AND priority <= 2', name='ck_cards_priority'), CheckConstraint('project_id IS NULL OR customer_id IS NULL', name='ck_cards_project_or_customer'))
+class CardAssignee(Base):
+    __tablename__ = 'card_assignees'
+    card_id: Mapped[int] = mapped_column(ForeignKey('cards.id', ondelete='CASCADE'), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), primary_key=True, index=True)
+class ChecklistItem(Base):
+    __tablename__ = 'card_checklist'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    card_id: Mapped[int] = mapped_column(ForeignKey('cards.id', ondelete='CASCADE'), index=True)
+    text: Mapped[str] = mapped_column(String(300))
+    done: Mapped[bool] = mapped_column(default=False)
+    position: Mapped[int]
 class WorkPunch(Base):
     """Surové pípnutia; UNIQUE(user_id, client_id) robí offline frontu idempotentnou."""
     __tablename__ = 'work_punches'

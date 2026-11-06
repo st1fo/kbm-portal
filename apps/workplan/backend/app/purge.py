@@ -1,7 +1,8 @@
 """Trvalé zmazanie používateľa a všetkých jeho údajov vo Workplane (volá iba portál s interným kľúčom).
 
-Zmaže: plány dochádzky, žiadosti o absenciu, notifikácie, Denník (dni a úseky, aktivity, to-do, pípnutia,
-mapovanie importu) a lokálny účet. Zdieľané záznamy ostanú: zákazníci/projekty/úlohy stratia iba autora,
+Zmaže: plány dochádzky, žiadosti o absenciu, notifikácie, Denník (dni a úseky, aktivity, pípnutia, mapovanie
+importu, osobné nástenky) a lokálny účet. Zdieľané záznamy ostanú: zákazníci/projekty/úlohy a karty stratia iba autora, tímovú
+nástenku prevezme ďalší člen,
 história zmien a schválenia cudzích žiadostí sa prepíšu na zástupný účet „Zmazaný používateľ“.
 """
 import secrets
@@ -11,7 +12,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 from .db import get_db
 from .models import (User, Attendance, LeaveRequest, Notification, Audit, Customer, Project, Task, WorkDay, WorkSegment,
-                     Activity, Todo, WorkPunch, ImportMap)
+                     Activity, WorkPunch, ImportMap, Board, BoardMember, Card, CardAssignee)
 from .portal_sso import check_internal_key
 from .security import hasher
 from .common import audit
@@ -54,11 +55,23 @@ def purge_user(db, email, actor_email=None):
     remove('useky', delete(WorkSegment).where(WorkSegment.work_day_id.in_(days)))
     remove('dni_dochadzky', delete(WorkDay).where(WorkDay.user_id == uid))
     remove('aktivity', delete(Activity).where(Activity.user_id == uid))
-    remove('todo', delete(Todo).where(Todo.user_id == uid))
+    # nástenky: osobné zmazať, tímové odovzdať ďalšiemu členovi; členstvá a priradenia zrušiť
+    from .boards import purge_board
+    counts['nastenky'] = 0
+    for b in db.scalars(select(Board).where(Board.owner_id == uid)).all():
+        heir = db.scalar(select(BoardMember.user_id).where(BoardMember.board_id == b.id, BoardMember.user_id != uid).order_by(BoardMember.user_id))
+        if heir is None:
+            purge_board(db, b.id); counts['nastenky'] += 1
+        else:
+            b.owner_id = heir
+            db.execute(delete(BoardMember).where(BoardMember.board_id == b.id, BoardMember.user_id == heir))
+    db.flush()
+    db.execute(delete(BoardMember).where(BoardMember.user_id == uid))
+    db.execute(delete(CardAssignee).where(CardAssignee.user_id == uid))
     remove('pipnutia', delete(WorkPunch).where(WorkPunch.user_id == uid))
     db.execute(delete(ImportMap).where(ImportMap.user_id == uid))
     db.execute(update(LeaveRequest).where(LeaveRequest.reviewed_by == uid).values(reviewed_by=ph.id))
-    for model in (Customer, Project, Task):
+    for model in (Customer, Project, Task, Card):
         db.execute(update(model).where(model.created_by == uid).values(created_by=None))
     db.execute(update(Audit).where(Audit.actor_id == uid).values(actor_id=ph.id))
     db.execute(delete(User).where(User.id == uid))

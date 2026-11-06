@@ -57,6 +57,10 @@ browser ─► gateway (nginx, gateway/nginx.conf, only exposed service)
 - The original login endpoints in both apps are disabled and return 410.
 - The portal and both APIs reject state-changing requests whose `Origin` or `Sec-Fetch-Site` is cross-site, which gives CSRF protection. The portal limits login attempts by `X-Real-IP`, a header nginx overwrites.
 
+Workplan's Denník has kanban boards (`app/boards.py`, migration 0004 moved the old `todos` into a personal board „Moje úlohy“; frontend `journal/Board*.tsx` with `@dnd-kit`). A board without members is personal; members see and edit cards and columns, only the owner (or an admin) changes settings, members or deletes it. Cards are deliberately not linked to Denník tasks/time; „Zapísať ako aktivitu“ only prefills the activity form.
+
+All three UIs share a light/dark theme: `localStorage['kbm-theme']` (`light`/`dark`/`auto`) → `data-theme` on `<html>`, applied before paint by a small non-inline script (CSP forbids inline) and switched from the top bar. Use the CSS tokens on `:root` in `apps/workplan/frontend/src/styles.css` instead of hex colours.
+
 Logbook domain logic sits in `apps/vehicle-logbook/backend/app/`:
 - `assistant.py` runs the chat-driven monthly wizard. Its draft lives in `assistant_sessions` and uploaded receipts in `assistant_files`. Chat and table edits go through the same `Operation` model, which allows edits to one concrete row only. The backend recomputes km and odometers through `recalculate`, `fill_gaps` and `distribute`, and approval writes trips and fuel purchases in one transaction (linked through `draft_id`). Gemini never writes to the logbook.
 - `gemini.py` calls Gemini through `google-genai` with structured output, validated by Pydantic. The model comes from `GEMINI_MODEL` and defaults to `gemini-3.1-flash-lite`. Tests swap `gemini.client_factory` for a fake client.

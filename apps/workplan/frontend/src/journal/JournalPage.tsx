@@ -1,4 +1,4 @@
-import { CalendarRange, FolderKanban, ListTodo, Sun, Upload } from 'lucide-react';
+import { CalendarRange, FolderKanban, SquareKanban, Sun, Upload } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { User } from '../api';
@@ -12,18 +12,18 @@ import { ImportDialog } from './ImportDialog';
 import { MonthOverview, ProjectStats } from './MonthOverview';
 import { ProjectManager } from './Projects';
 import { usePunchQueue } from './punchQueue';
-import { TodoCard } from './Todos';
+import { BoardsPage } from './Board';
 import './journal.css';
 
 type Tab = 'today' | 'todo' | 'projects' | 'month';
 const TABS: [Tab, string, typeof Sun, string][] = [
   ['today', 'Dnes', Sun, 'dochádzka a aktivity'],
-  ['todo', 'To-do', ListTodo, 'čo treba spraviť'],
+  ['todo', 'Nástenky', SquareKanban, 'úlohy na kartách'],
   ['projects', 'Projekty', FolderKanban, 'zákazníci, úlohy, čas'],
   ['month', 'Mesiac', CalendarRange, 'odpracované dni'],
 ];
 
-/** Sekcia Denník: skutočný odpracovaný čas, aktivity na úlohách a to-do. */
+/** Sekcia Denník: skutočný odpracovaný čas, aktivity na úlohách a nástenky úloh. */
 export function JournalPage({ me, users, isAdmin, notify }: { me: User; users: User[]; isAdmin: boolean; notify: (m: string) => void }) {
   const qc = useQueryClient();
   const [viewUid, setViewUid] = useState<number | null>(null);   // null = vlastný denník; admin môže prezerať iného
@@ -52,7 +52,7 @@ export function JournalPage({ me, users, isAdmin, notify }: { me: User; users: U
           <option value="">{me.name} (môj)</option>
           {users.filter(u => u.active && u.id !== me.id).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select></label>
-      {viewed && <span className="j-viewer-note">Prezeráte denník používateľa {viewed.name}. Pípať môže iba on sám; dni, aktivity a to-do môžete opraviť (zmeny sa zapíšu do auditu).</span>}
+      {viewed && <span className="j-viewer-note">Prezeráte denník používateľa {viewed.name}. Pípať môže iba on sám; dni, aktivity a jeho nástenky môžete opraviť (zmeny sa zapíšu do auditu).</span>}
     </div>}
     {shownError && <div role="alert" className="error">{shownError}<button onClick={() => { setError(''); q.clearError(); }}>Zavrieť</button></div>}
     {state.isError && <div role="alert" className="error">Stav dochádzky sa nepodarilo načítať. <button onClick={() => void state.refetch()}>Skúsiť znova</button></div>}
@@ -67,7 +67,7 @@ export function JournalPage({ me, users, isAdmin, notify }: { me: User; users: U
         <div className="j-col"><ActivityLog uid={uid} onOpenTask={id => { setOpenTask({ id, nonce: Date.now() }); setTab('projects'); }} onError={onError} /></div>
       </div>
     </>}
-    {tab === 'todo' && <div className="j-single"><TodoCard uid={uid} onWrite={write} onError={onError} /></div>}
+    {tab === 'todo' && <BoardsPage uid={uid} me={me} users={users} onWrite={write} onError={onError} />}
     {tab === 'projects' && <div className="j-dash">
       <div className="j-col"><ProjectManager uid={uid} isAdmin={isAdmin} openTask={openTask} onWrite={write} onError={onError} /></div>
       <div className="j-col"><ProjectStats uid={uid} month={month} /></div>

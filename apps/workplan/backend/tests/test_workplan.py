@@ -177,7 +177,7 @@ def test_admin_team_filter_in_statistics_and_reports(client):
     assert 'User 3' in r.text and 'User 2' not in r.text
 
 def test_internal_purge_removes_personal_data_and_keeps_shared(client,monkeypatch):
-    from app.models import Notification, Audit, WorkDay, WorkSegment, Activity, Todo, Project, Task
+    from app.models import Notification, Audit, WorkDay, WorkSegment, Activity, Card, Board, Project, Task
     from sqlalchemy import func
     key='k'*40; monkeypatch.setenv('SSO_INTERNAL_KEY',key)
     h2=auth(client,2); admin=auth(client)
@@ -189,11 +189,15 @@ def test_internal_purge_removes_personal_data_and_keeps_shared(client,monkeypatc
     pid=client.post('/api/journal/projects',headers=h2,json={'name':'Web'}).json()['id']
     tid=client.post('/api/journal/tasks',headers=h2,json={'name':'UI','project_id':pid}).json()['id']
     client.post('/api/journal/activities',headers=h2,json={'task_id':tid,'date':'2026-11-02','start':'08:00','end':'09:00','text':'x'})
-    client.post('/api/journal/todos',headers=h2,json={'text':'y'})
+    own=client.get('/api/journal/boards',headers=h2).json()[0]
+    col=client.get(f"/api/journal/boards/{own['id']}",headers=h2).json()['columns'][0]['id']
+    client.post(f"/api/journal/boards/{own['id']}/cards",headers=h2,json={'column_id':col,'title':'y'})
+    team=client.post('/api/journal/boards',headers=h2,json={'name':'Tím','member_ids':[3]}).json()
+    tc=client.post(f"/api/journal/boards/{team['id']}/cards",headers=h2,json={'column_id':team['columns'][0]['id'],'title':'spoločná','assignee_ids':[2,3]}).json()
     assert client.post('/api/internal/purge-user',json={'email':'u2@test.local'}).status_code==403          # bez kľúča nie
     r=client.post('/api/internal/purge-user',headers={'X-SSO-Key':key},json={'email':'u2@test.local','actor_email':'u1@test.local'})
     assert r.status_code==200 and r.json()['found']
-    c=r.json()['counts']; assert c['plany']==1 and c['ziadosti']==1 and c['aktivity']==1 and c['todo']==1 and c['dni_dochadzky']==1 and c['useky']==1
+    c=r.json()['counts']; assert c['plany']==1 and c['ziadosti']==1 and c['aktivity']==1 and c['nastenky']==1 and c['dni_dochadzky']==1 and c['useky']==1
     assert client.post('/api/internal/purge-user',headers={'X-SSO-Key':key},json={'email':'u2@test.local'}).json()['found'] is False
     # admin (u1) zmazaný: jeho schválenie cudzej žiadosti a audit prejdú na zástupný účet, žiadosť u3 ostane
     r=client.post('/api/internal/purge-user',headers={'X-SSO-Key':key},json={'email':'u1@test.local'})
@@ -208,3 +212,6 @@ def test_internal_purge_removes_personal_data_and_keeps_shared(client,monkeypatc
     assert db.scalar(select(func.count()).select_from(Audit).where(Audit.actor_id.in_([1,2])))==0
     assert db.get(Project,pid).created_by is None and db.get(Task,tid) is not None              # zdieľaný katalóg ostáva
     assert db.scalar(select(func.count()).select_from(Activity))==0 and db.scalar(select(func.count()).select_from(WorkSegment))==0
+    tb=db.get(Board,team['id']); assert tb.owner_id==3 and db.get(Card,tc['id']).created_by is None   # tímová nástenka prešla na člena
+    assert client.get(f"/api/journal/boards/{team['id']}",headers=auth(client,3)).json()['cards'][0]['assignee_ids']==[3]
+    assert db.get(Board,own['id']) is None

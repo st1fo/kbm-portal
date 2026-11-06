@@ -14,8 +14,8 @@ import hashlib
 import json
 from datetime import date, datetime, timezone
 from fastapi import HTTPException
-from sqlalchemy import select
-from .models import Customer, Project, Task, WorkDay, Activity, Todo, ImportMap, name_key
+from sqlalchemy import select, func
+from .models import Customer, Project, Task, WorkDay, Activity, Card, BoardColumn, ImportMap, name_key
 from .common import TZ, audit
 from . import journal_calc as jc
 from .journal import resolve_customer, project_conflict, store, utc, now, clean_name
@@ -246,11 +246,21 @@ class Importer:
             self.created['activities'] += 1
 
     def todos(self, items, project_ids):
+        """Staré to-do → karty na prvej vlastnej nástenke (otvorené do prvého stĺpca, hotové do stĺpca Hotovo)."""
+        from .boards import ensure_default_board
+        board = cols = None
+        positions = {}
+        def next_pos(cid):
+            if cid not in positions:
+                m = self.db.scalar(select(func.max(Card.position)).where(Card.column_id == cid))
+                positions[cid] = -1 if m is None else m
+            positions[cid] += 1
+            return positions[cid]
         for t in items:
             text = text_of(t.get('text'), 500)
             if not text: continue
             legacy = legacy_key(t.get('id'), ['todo', t.get('text'), t.get('createdAt')])
-            if self.mapped('todo', legacy, Todo):
+            if self.mapped('todo', legacy, Card):
                 self.skipped['todos'] += 1; continue
             try:
                 due = date.fromisoformat(t['due']) if isinstance(t.get('due'), str) and t['due'] else None
@@ -261,8 +271,13 @@ class Importer:
             pid = project_ids.get(t.get('projectId')) if t.get('projectId') else None
             cid = None if pid else self.customer(t.get('customer'))
             done_at = (from_ms(t.get('doneAt')) or from_ms(t.get('createdAt')) or now()) if t.get('done') else None
-            obj = Todo(user_id=self.u.id, text=text, due=due, priority=prio, project_id=pid, customer_id=cid,
-                       done_at=utc(done_at), created_at=utc(from_ms(t.get('createdAt')) or now()))
+            if board is None:
+                board = ensure_default_board(self.db, self.u.id)
+                all_cols = list(self.db.scalars(select(BoardColumn).where(BoardColumn.board_id == board.id).order_by(BoardColumn.position)))
+                cols = [next((c for c in all_cols if not c.is_done), all_cols[0]), next((c for c in all_cols if c.is_done), all_cols[-1])]
+            col = cols[-1] if done_at else cols[0]
+            obj = Card(board_id=board.id, column_id=col.id, position=next_pos(col.id), title=text, description='', due=due, priority=prio,
+                       project_id=pid, customer_id=cid, created_by=self.u.id, done_at=utc(done_at), created_at=utc(from_ms(t.get('createdAt')) or now()))
             self.db.add(obj); self.db.flush()
             self.remember('todo', legacy, obj.id)
             self.created['todos'] += 1
