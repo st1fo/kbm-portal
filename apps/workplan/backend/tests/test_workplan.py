@@ -163,3 +163,15 @@ def test_new_portal_account_is_created_automatically(client):
     assert 'Nová Kolegyňa' in names                       # admin ju vidí hneď, aj pred prvým prihlásením
     me=client.get('/api/auth/me',headers={'X-Test-Email':'nova@test.local'}).json()
     assert me['name']=='Nová Kolegyňa' and me['role']=='employee' and me['daily_hours']==8
+
+
+def test_admin_team_filter_in_statistics_and_reports(client):
+    DIRECTORY[2]=person(3,groups=(2,))
+    for i in (2,3): client.post('/api/attendance',headers=auth(client,i),json=plan(user_id=i,start_date=str(date.today()),end_date=str(date.today())))
+    h=auth(client)
+    assert client.get('/api/statistics?month=2026-11',headers=h).json()['employees']==3
+    assert client.get('/api/statistics?month=2026-11&group=skupina 2',headers=h).json()['employees']==1
+    # zamestnanec si cudzí tím nezobrazí: filter iba zužuje jeho vlastnú viditeľnosť
+    assert client.get('/api/statistics?month=2026-11&group=Skupina 2',headers=auth(client,2)).json()['employees']==0
+    r=client.get('/api/reports?start=2026-01-01&end=2026-12-31&group=Skupina 2',headers=h)
+    assert 'User 3' in r.text and 'User 2' not in r.text

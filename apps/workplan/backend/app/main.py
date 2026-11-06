@@ -14,7 +14,7 @@ from .schemas import Login, Employee, TypeInput, Plan, Review, SettingsInput, Ho
 from .security import current_user, admin, token, hasher
 from .common import TZ, today, row, audit, commit, owner, employee, days, month_bounds, get_settings, working_dates
 from .journal import router as journal_router
-from .directory import visible_user_ids, group_names
+from .directory import visible_user_ids, group_names, restrict_to_group
 
 app = FastAPI(title='KBM Workplan API',version='1.0.0')
 app.include_router(journal_router)
@@ -158,8 +158,8 @@ def cancel_request(rid:int,u=Depends(current_user),db:Session=Depends(get_db)):
     db.flush(); r.status='rejected'; r.reason='Zrušené'; r.reviewed_by=u.id; r.reviewed_at=datetime.now(TZ)
     db.add(Notification(user_id=r.user_id,message='Žiadosť bola zrušená.')); audit(db,u,'request.cancel',rid); commit(db); return {'ok':True}
 @app.get('/api/statistics')
-def statistics(month:str,u=Depends(current_user),db:Session=Depends(get_db)):
-    start,end=month_bounds(month); vis=visible_user_ids(db,u)
+def statistics(month:str,group:str|None=None,u=Depends(current_user),db:Session=Depends(get_db)):
+    start,end=month_bounds(month); vis=restrict_to_group(db,visible_user_ids(db,u),group)
     all_users=[x for x in db.scalars(select(User).where(User.active==True)) if vis is None or x.id in vis]
     counts=defaultdict(int)
     for e in db.scalars(select(Attendance).where(Attendance.date==today())):
@@ -199,10 +199,11 @@ def delete_holiday(day:date,u=Depends(admin),db:Session=Depends(get_db)):
 def audit_logs(u=Depends(admin),db:Session=Depends(get_db)):
     return [row(x) for x in db.scalars(select(Audit).order_by(Audit.id.desc()).limit(100))]
 @app.get('/api/reports')
-def report(start:date,end:date,format:str='csv',user_id:int|None=None,u=Depends(admin),db:Session=Depends(get_db)):
+def report(start:date,end:date,format:str='csv',user_id:int|None=None,group:str|None=None,u=Depends(admin),db:Session=Depends(get_db)):
     if end<start or (end-start).days>366: raise HTTPException(422,'Neplatný rozsah dátumov.')
     if format not in ['csv','xlsx']: raise HTTPException(422,'Podporované: csv, xlsx.')
-    users=list(db.scalars(select(User).where(User.id==user_id) if user_id else select(User)))
+    team=restrict_to_group(db,None,group)
+    users=[x for x in db.scalars(select(User).where(User.id==user_id) if user_id else select(User).order_by(User.name)) if team is None or x.id in team]
     types={t.id:t.name for t in db.scalars(select(AttendanceType))}
     table=[['Zamestnanec','Dátum','Plán','Poznámka']]
     for person in users:
