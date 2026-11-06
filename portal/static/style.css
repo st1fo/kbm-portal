@@ -39,3 +39,5 @@ label.check[hidden]{display:none}
 .copy-row{display:flex;gap:8px}.copy-row input{margin:0;font-size:12px}.hint{font-size:12px;color:#6b787f;margin:12px 0 0!important}
 @media(max-width:900px){.admin-grid{grid-template-columns:1fr}}
 @media(max-width:620px){.admin-view{padding-top:30px}.admin-card{padding:18px}.form-grid{grid-template-columns:1fr}.admin-link{padding:6px 9px;font-size:10px}.card-title input{max-width:none}.copy-row{flex-direction:column}#account #name{display:none}}
+.danger-button{border:0;border-radius:7px;padding:11px 16px;background:#b3404f;color:#fff;font-size:12px;font-weight:650}.danger-button:hover:not(:disabled){background:#9c3442}.danger-button:disabled{opacity:.45;cursor:not-allowed}.danger-text{color:#b3404f!important}
+#user-delete{margin-right:auto}#user-delete+#user-reinvite{margin-right:0}

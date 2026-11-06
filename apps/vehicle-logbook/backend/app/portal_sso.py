@@ -43,3 +43,11 @@ def portal_directory(max_age=None):
         except (HTTPError, URLError, TimeoutError, OSError, ValueError):
             pass
         return _directory["data"]
+
+
+def check_internal_key(request):
+    """Interné volania z portálu (napr. trvalé zmazanie používateľa) musia niesť X-SSO-Key."""
+    import hmac
+    key = os.environ.get("SSO_INTERNAL_KEY", "")
+    if len(key) < 32 or not hmac.compare_digest(request.headers.get("x-sso-key", ""), key):
+        raise HTTPException(403, "Neplatný interný kľúč.")

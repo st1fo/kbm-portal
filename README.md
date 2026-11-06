@@ -47,6 +47,7 @@ Administrátor v portáli (`/?admin=1`):
 - **pridelí prístup k aplikáciám** (Workplan, Kniha jázd). Bez prístupu sa karta aplikácie na hlavnej stránke nezobrazí, nginx nepustí rozhranie (presmeruje na portál s upozornením) a API aplikácie vráti 403. Zmena platí okamžite;
 - **zaradí do skupín**. Úvodné skupiny sú Vedenie, Vývojári, Predaj, Technici, Administratíva a Brigádnici; ďalšie sa dajú pridať, premenovať alebo zmazať. Človek môže byť vo viacerých skupinách. **Vo Workplane zamestnanec vidí v kalendári, prehľade a zozname ľudí iba seba a členov svojich skupín**, administrátor vidí všetkých. Kalendár má filter podľa skupiny;
 - **deaktivuje účet**: okamžite zruší všetky relácie a prihlásenie.
+- **zmaže účet natrvalo** (Upraviť → Zmazať natrvalo, potvrdenie napísaním prihlasovacieho mena): portál najprv požiada Workplan aj Knihu jázd o zmazanie všetkých údajov človeka (plány, žiadosti, notifikácie, Denník, priradenie vozidiel, rozpracované návrhy) a až potom zmaže účet. Firemné záznamy (jazdy a tankovania vozidiel, zdieľané projekty a úlohy) ostanú; v histórii zmien a pri schváleniach, ktoré urobil, je „Zmazaný používateľ“. Ak niektorá aplikácia neodpovie, účet sa nezmaže a dá sa to zopakovať. Vlastný účet zmazať nemožno.
 
 Zmeny sa zapisujú do histórie v správe používateľov. Nový používateľ sa vo Workplane aj v Knihe jázd objaví hneď (aplikácie si zoznam ľudí berú z portálu cez interné `/internal/directory`), takže mu admin môže naplánovať dochádzku alebo priradiť vozidlo ešte pred prvým prihlásením.
 

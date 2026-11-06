@@ -15,7 +15,7 @@ from openpyxl.utils.exceptions import InvalidFileException
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 
-from . import assistant, distances, exports, importer, planner
+from . import assistant, distances, exports, importer, planner, purge
 from .auth import COOKIE, DUMMY, administrator, check_password, current_user, db_session, digest, hash_password, login
 from .db import Access, Audit, Batch, Closing, Destination, Fuel, Holiday, Login, MonthlyDraft, Trip, User, Vehicle, now
 from .ledger import events, ledger, month_of, months, next_month, report, rounded
@@ -23,6 +23,7 @@ from .schemas import Credentials, DestinationIn, FuelIn, TripIn, UserIn, Vehicle
 
 app = FastAPI(title="Kniha jázd", docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(assistant.router)
+app.include_router(purge.router)
 Db = Depends(db_session)
 Member = Depends(current_user)
 Admin = Depends(administrator)

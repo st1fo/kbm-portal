@@ -2,7 +2,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const APPS = { workplan: 'Workplan', 'vehicle-logbook': 'Kniha jázd' };
-  const ACTIONS = { 'user.create': 'vytvoril účet', 'user.update': 'upravil účet', 'user.invite': 'poslal nový odkaz na heslo', 'group.create': 'pridal skupinu', 'group.rename': 'premenoval skupinu', 'group.delete': 'zmazal skupinu', 'password.set': 'si nastavil heslo' };
+  const ACTIONS = { 'user.create': 'vytvoril účet', 'user.update': 'upravil účet', 'user.invite': 'poslal nový odkaz na heslo', 'user.delete': 'natrvalo zmazal účet', 'group.create': 'pridal skupinu', 'group.rename': 'premenoval skupinu', 'group.delete': 'zmazal skupinu', 'password.set': 'si nastavil heslo' };
   let users = [], groups = [], settings = { smtp: false }, editing = null;
 
   async function call(path, method = 'GET', data) {
@@ -91,6 +91,7 @@
     f.admin.checked = !!u?.admin; f.active.checked = u ? u.active : true;
     f.send_email.checked = settings.smtp; f.send_email.disabled = !settings.smtp;
     $('active-check').hidden = !u; $('send-check').hidden = !!u; $('user-reinvite').hidden = !u || !u.active;
+    $('user-delete').hidden = !u || u.slug === (typeof current !== 'undefined' && current ? current.slug : '');
     checks($('app-checks'), Object.entries(APPS), 'apps', u ? u.apps : Object.keys(APPS));
     checks($('group-checks'), groups.map(g => [String(g.id), g.name]), 'groups', u ? u.groups.map(g => String(g.id)) : []);
     if (!groups.length) $('group-checks').append(el('span', { className: 'muted', textContent: 'Najprv pridajte skupinu.' }));
@@ -129,6 +130,26 @@
     if (!editing || !confirm(`Vytvoriť nový odkaz na nastavenie hesla pre ${editing.name}? Doterajšie heslo platí, kým si nastaví nové.`)) return;
     try { const r = await call(`/auth/admin/users/${editing.slug}/invite`, 'POST', { send_email: settings.smtp }); $('user-dialog').close(); showInvite(r, editing, false); await refresh(); }
     catch (e) { msg('user-error', e.message); }
+  });
+  $('user-delete').addEventListener('click', () => {
+    if (!editing) return;
+    const target = editing;
+    $('user-dialog').close();
+    const form = $('delete-form'); form.reset(); msg('delete-error', '');
+    $('delete-title').textContent = `Zmazať ${target.name}?`;
+    $('delete-slug').textContent = target.slug;
+    $('delete-submit').disabled = true;
+    form.dataset.slug = target.slug;
+    $('delete-dialog').showModal();
+  });
+  $('delete-form').elements.namedItem('confirm').addEventListener('input', e => { $('delete-submit').disabled = e.target.value.trim().toLowerCase() !== $('delete-form').dataset.slug; });
+  $('delete-form').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const slug = ev.target.dataset.slug, btn = $('delete-submit'); btn.disabled = true; msg('delete-error', '');
+    try {
+      await call('/auth/admin/users/' + encodeURIComponent(slug), 'DELETE', { confirm: ev.target.elements.namedItem('confirm').value });
+      $('delete-dialog').close(); await refresh();
+    } catch (e) { msg('delete-error', e.message); btn.disabled = false; }
   });
   $('invite-copy').addEventListener('click', async () => {
     try { await navigator.clipboard.writeText($('invite-url').value); $('invite-copy').textContent = 'Skopírované ✓'; }

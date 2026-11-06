@@ -14,7 +14,7 @@ KEY='a'*64
 def services(tmp_path_factory):
     data=tmp_path_factory.mktemp('sso')
     processes=[]
-    common={**os.environ,'NO_PROXY':'127.0.0.1,localhost','no_proxy':'127.0.0.1,localhost','SSO_INTERNAL_KEY':KEY,'SSO_URL':'http://127.0.0.1:19100','JWT_SECRET':KEY,'DEMO_PASSWORD':PASSWORD,'COOKIE_SECURE':'0','PORTAL_DB':str(data/'portal.sqlite'),'PORTAL_DIRECTORY_CACHE_SECONDS':'0'}
+    common={**os.environ,'NO_PROXY':'127.0.0.1,localhost','no_proxy':'127.0.0.1,localhost','SSO_INTERNAL_KEY':KEY,'SSO_URL':'http://127.0.0.1:19100','JWT_SECRET':KEY,'DEMO_PASSWORD':PASSWORD,'COOKIE_SECURE':'0','PORTAL_DB':str(data/'portal.sqlite'),'PORTAL_DIRECTORY_CACHE_SECONDS':'0','WORKPLAN_INTERNAL_URL':'http://127.0.0.1:19101','LOGBOOK_INTERNAL_URL':'http://127.0.0.1:19102'}
     try:
         # Test schemas use ORM metadata because Workplan's frozen migration is PostgreSQL DDL.
         for app in ['workplan','vehicle-logbook']:
@@ -177,3 +177,36 @@ def test_group_visibility_in_workplan_and_deactivation(services):
         assert get(services['workplan']+'/api/auth/me',pc).status_code==401
         assert p.post('/auth/login',json={'username':'peter','password':'Peter-Heslo-2026!'}).status_code==401
         assert m.patch('/auth/admin/users/maros',json={'active':False}).status_code==422            # seba nie
+
+
+def test_admin_permanently_deletes_user_with_all_app_data(services):
+    with client(services) as admin:
+        login(admin)
+        r=admin.post('/auth/admin/users',json={'name':'Eva Dočasná','username':'eva','email':'eva@test.local','apps':['workplan','vehicle-logbook'],'send_email':False})
+        admin.post('/auth/invite',json={'token':r.json()['invite_url'].split('invite=')[1],'password':'Eva-Heslo-2026!!'})
+    with client(services) as eva, httpx.Client(trust_env=False) as app:
+        cookies=login(eva,'eva','Eva-Heslo-2026!!'); app.cookies.update(cookies)
+        me=app.get(services['workplan']+'/api/auth/me').json()
+        assert app.post(services['workplan']+'/api/attendance',json={'user_id':me['id'],'type_id':1,'start_date':'2026-11-02','end_date':'2026-11-02'}).status_code==200
+        assert app.put(services['workplan']+'/api/journal/days/2026-11-02',json={'segments':[{'start':'08:00','end':'12:00'}]}).status_code==200
+        assert app.post(services['workplan']+'/api/journal/todos',json={'text':'zavolať'}).status_code==200
+        assert app.get(services['logbook']+'/api/me').status_code==200
+    with client(services) as admin:
+        login(admin)
+        assert admin.request('DELETE','/auth/admin/users/eva',json={'confirm':'iny'}).status_code==422
+        assert admin.request('DELETE','/auth/admin/users/maros',json={'confirm':'maros'}).status_code==422
+        r=admin.request('DELETE','/auth/admin/users/eva',json={'confirm':'eva'})
+        assert r.status_code==200,r.text
+        res=r.json()['results']; assert res['workplan']['found'] and res['workplan']['counts']['plany']==1 and res['workplan']['counts']['todo']==1
+        assert res['vehicle-logbook']['found']
+        assert 'eva' not in [u['slug'] for u in admin.get('/auth/admin/users').json()]
+        assert any(a['action']=='user.delete' for a in admin.get('/auth/admin/audit').json())
+        assert 'Eva Dočasná' not in [u['name'] for u in admin.get(services['workplan']+'/api/employees').json()]
+        assert 'eva' not in [u['username'] for u in admin.get(services['logbook']+'/api/users').json()]
+    assert get(services['workplan']+'/api/auth/me',cookies).status_code==401
+    with client(services) as c:
+        assert c.post('/auth/login',json={'username':'eva','password':'Eva-Heslo-2026!!'}).status_code==401
+    # interné mazanie aplikácií nie je dostupné bez kľúča
+    with httpx.Client(trust_env=False) as c:
+        assert c.post(services['workplan']+'/api/internal/purge-user',json={'email':'zdenko@demo.kbm.local'}).status_code==403
+        assert c.post(services['logbook']+'/api/internal/purge-user',json={'username':'zdenko'}).status_code==403

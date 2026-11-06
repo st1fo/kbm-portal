@@ -175,3 +175,36 @@ def test_admin_team_filter_in_statistics_and_reports(client):
     assert client.get('/api/statistics?month=2026-11&group=Skupina 2',headers=auth(client,2)).json()['employees']==0
     r=client.get('/api/reports?start=2026-01-01&end=2026-12-31&group=Skupina 2',headers=h)
     assert 'User 3' in r.text and 'User 2' not in r.text
+
+def test_internal_purge_removes_personal_data_and_keeps_shared(client,monkeypatch):
+    from app.models import Notification, Audit, WorkDay, WorkSegment, Activity, Todo, Project, Task
+    from sqlalchemy import func
+    key='k'*40; monkeypatch.setenv('SSO_INTERNAL_KEY',key)
+    h2=auth(client,2); admin=auth(client)
+    client.post('/api/attendance',headers=h2,json=plan())
+    rid=client.post('/api/requests',headers=auth(client,3),json=plan(user_id=3,type_id=3,start_date='2026-11-10',end_date='2026-11-10')).json()['id']
+    assert client.post(f'/api/requests/{rid}/review',headers=admin,json={'status':'approved'}).status_code==200
+    client.post('/api/requests',headers=h2,json=plan(type_id=3,start_date='2026-11-20',end_date='2026-11-20'))
+    client.put('/api/journal/days/2026-11-02',headers=h2,json={'segments':[{'start':'08:00','end':'16:00'}]})
+    pid=client.post('/api/journal/projects',headers=h2,json={'name':'Web'}).json()['id']
+    tid=client.post('/api/journal/tasks',headers=h2,json={'name':'UI','project_id':pid}).json()['id']
+    client.post('/api/journal/activities',headers=h2,json={'task_id':tid,'date':'2026-11-02','start':'08:00','end':'09:00','text':'x'})
+    client.post('/api/journal/todos',headers=h2,json={'text':'y'})
+    assert client.post('/api/internal/purge-user',json={'email':'u2@test.local'}).status_code==403          # bez kľúča nie
+    r=client.post('/api/internal/purge-user',headers={'X-SSO-Key':key},json={'email':'u2@test.local','actor_email':'u1@test.local'})
+    assert r.status_code==200 and r.json()['found']
+    c=r.json()['counts']; assert c['plany']==1 and c['ziadosti']==1 and c['aktivity']==1 and c['todo']==1 and c['dni_dochadzky']==1 and c['useky']==1
+    assert client.post('/api/internal/purge-user',headers={'X-SSO-Key':key},json={'email':'u2@test.local'}).json()['found'] is False
+    # admin (u1) zmazaný: jeho schválenie cudzej žiadosti a audit prejdú na zástupný účet, žiadosť u3 ostane
+    r=client.post('/api/internal/purge-user',headers={'X-SSO-Key':key},json={'email':'u1@test.local'})
+    assert r.status_code==200
+    from app.db import get_db
+    db=next(client.app.dependency_overrides[get_db]())
+    from app.models import User, LeaveRequest
+    ph=db.scalar(select(User).where(User.email=='zmazany.pouzivatel@deleted.invalid'))
+    assert ph and not ph.active
+    assert db.get(LeaveRequest,rid).reviewed_by==ph.id
+    assert db.scalar(select(func.count()).select_from(User).where(User.email.in_(['u1@test.local','u2@test.local'])))==0
+    assert db.scalar(select(func.count()).select_from(Audit).where(Audit.actor_id.in_([1,2])))==0
+    assert db.get(Project,pid).created_by is None and db.get(Task,tid) is not None              # zdieľaný katalóg ostáva
+    assert db.scalar(select(func.count()).select_from(Activity))==0 and db.scalar(select(func.count()).select_from(WorkSegment))==0

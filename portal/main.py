@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 from email.message import EmailMessage
 from typing import Literal
 from urllib.parse import urlsplit
+from urllib.request import Request as URLRequest, urlopen
+from urllib.error import HTTPError, URLError
 from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -310,6 +312,41 @@ def admin_reinvite(slug:str, data:SendIn, request:Request):
         audit(db, actor["slug"], "user.invite", {"slug":slug})
         prepared=prepare_invite(db, request, slug, "reset")
     return send_invite(prepared, data.send_email)
+class DeleteIn(BaseModel):
+    confirm: str = Field(min_length=1,max_length=60)
+# Interné adresy aplikácií pre trvalé zmazanie údajov (v Compose cez Docker sieť, mimo nginx).
+APP_INTERNAL={"workplan":"WORKPLAN_INTERNAL_URL","vehicle-logbook":"LOGBOOK_INTERNAL_URL"}
+def purge_in_apps(user, actor):
+    """Najprv zmaže údaje v oboch aplikáciách; ak niektorá neodpovie, účet v portáli ostane (opakovanie je bezpečné)."""
+    results={}
+    for app_name,env in APP_INTERNAL.items():
+        base=os.getenv(env)
+        if not base: raise HTTPException(503,f"Mazanie v aplikácii {APPS[app_name]} nie je nastavené ({env}).")
+        payload={"email":user["email"],"actor_email":actor["email"]} if app_name=="workplan" else {"username":user["slug"]}
+        req=URLRequest(base.rstrip("/")+"/api/internal/purge-user",data=json.dumps(payload).encode(),method="POST",
+                       headers={"Content-Type":"application/json","X-SSO-Key":os.environ["SSO_INTERNAL_KEY"]})
+        try:
+            with urlopen(req,timeout=30) as response: results[app_name]=json.load(response)
+        except (HTTPError,URLError,TimeoutError,OSError,ValueError):
+            raise HTTPException(503,f"Aplikácia {APPS[app_name]} neodpovedá, účet sa nezmazal. Skúste to znova o chvíľu.")
+    return results
+@app.delete("/auth/admin/users/{slug}")
+def admin_delete(slug:str, data:DeleteIn, request:Request):
+    """Trvalé zmazanie používateľa a všetkých jeho údajov v portáli aj v aplikáciách. Nedá sa vrátiť."""
+    actor=admin_only(request)
+    if slug==actor["slug"]: raise HTTPException(422,"Vlastný účet nemôžete zmazať.")
+    if data.confirm.strip().lower()!=slug: raise HTTPException(422,"Na potvrdenie napíšte presne prihlasovacie meno používateľa.")
+    with connect() as db:
+        row=db.execute("SELECT * FROM users WHERE slug=?",(slug,)).fetchone()
+        if not row: raise HTTPException(404,"Používateľ neexistuje.")
+        user=dict(row)
+        db.execute("DELETE FROM sessions WHERE slug=?",(slug,))   # okamžité odhlásenie ešte pred mazaním v aplikáciách
+    results=purge_in_apps(user, actor)
+    with connect() as db:
+        db.execute("DELETE FROM sessions WHERE slug=?",(slug,))
+        db.execute("DELETE FROM users WHERE slug=?",(slug,))     # skupiny a pozvánky cez ON DELETE CASCADE
+        audit(db, actor["slug"], "user.delete", {"slug":slug,"name":user["name"],"email":user["email"],**{k:v.get("counts",{}) for k,v in results.items()}})
+    return {"ok":True,"results":results}
 @app.get("/auth/admin/groups")
 def admin_groups(request:Request):
     admin_only(request)
