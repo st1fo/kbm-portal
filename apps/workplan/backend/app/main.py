@@ -14,6 +14,7 @@ from .schemas import Login, Employee, TypeInput, Plan, Review, SettingsInput, Ho
 from .security import current_user, admin, token, hasher
 from .common import TZ, today, row, audit, commit, owner, employee, days, month_bounds, get_settings, working_dates
 from .journal import router as journal_router
+from .directory import visible_user_ids, group_names
 
 app = FastAPI(title='KBM Workplan API',version='1.0.0')
 app.include_router(journal_router)
@@ -66,12 +67,14 @@ def login(p:Login,request:Request,db:Session=Depends(get_db)):
 def me(u=Depends(current_user)): return row(u)
 @app.get('/api/employees')
 def employees(u=Depends(current_user),db:Session=Depends(get_db)):
+    vis=visible_user_ids(db,u); groups=group_names(db)
     q=select(User).order_by(User.id)
     if u.role!='admin': q=q.where(User.active==True)
-    return [row(x) for x in db.scalars(q)]
+    if vis is not None: q=q.where(User.id.in_(vis))
+    return [{**row(x),'groups':groups.get(x.email,[])} for x in db.scalars(q)]
 @app.post('/api/employees')
 def add_employee(p:Employee,u=Depends(admin),db:Session=Depends(get_db)):
-    raise HTTPException(409,'Prototyp používa štyri spoločné účty portálu.')
+    raise HTTPException(409,'Účty sa pridávajú v portáli KBM (Správa používateľov).')
     if not p.password: raise HTTPException(422,'Zadajte heslo s aspoň 10 znakmi.')
     obj=User(**p.model_dump(exclude={'password'}),password_hash=hasher.hash(p.password)); obj.email=obj.email.lower().strip()
     db.add(obj); audit(db,u,'employee.create',p.email); commit(db); return row(obj)
@@ -98,8 +101,10 @@ def edit_type(tid:int,p:TypeInput,u=Depends(admin),db:Session=Depends(get_db)):
     audit(db,u,'type.update',tid); commit(db); return row(t)
 @app.get('/api/calendar')
 def calendar_data(month:str,u=Depends(current_user),db:Session=Depends(get_db)):
-    start,end=month_bounds(month)
-    return {'entries':[row(x) for x in db.scalars(select(Attendance).where(Attendance.date.between(start,end)))], 'requests':[row(x) for x in db.scalars(select(LeaveRequest).where(LeaveRequest.status=='pending',LeaveRequest.start_date<=end,LeaveRequest.end_date>=start))], 'holidays':[row(x) for x in db.scalars(select(Holiday).where(Holiday.date.between(start,end)))], 'settings':get_settings(db)}
+    start,end=month_bounds(month); vis=visible_user_ids(db,u)
+    entries=select(Attendance).where(Attendance.date.between(start,end)); pending=select(LeaveRequest).where(LeaveRequest.status=='pending',LeaveRequest.start_date<=end,LeaveRequest.end_date>=start)
+    if vis is not None: entries=entries.where(Attendance.user_id.in_(vis)); pending=pending.where(LeaveRequest.user_id.in_(vis))
+    return {'entries':[row(x) for x in db.scalars(entries)], 'requests':[row(x) for x in db.scalars(pending)], 'holidays':[row(x) for x in db.scalars(select(Holiday).where(Holiday.date.between(start,end)))], 'settings':get_settings(db)}
 @app.post('/api/attendance')
 def save_attendance(p:Plan,u=Depends(current_user),db:Session=Depends(get_db)):
     owner(u,p.user_id); employee(db,p.user_id)
@@ -154,10 +159,13 @@ def cancel_request(rid:int,u=Depends(current_user),db:Session=Depends(get_db)):
     db.add(Notification(user_id=r.user_id,message='Žiadosť bola zrušená.')); audit(db,u,'request.cancel',rid); commit(db); return {'ok':True}
 @app.get('/api/statistics')
 def statistics(month:str,u=Depends(current_user),db:Session=Depends(get_db)):
-    start,end=month_bounds(month); all_users=list(db.scalars(select(User).where(User.active==True)))
+    start,end=month_bounds(month); vis=visible_user_ids(db,u)
+    all_users=[x for x in db.scalars(select(User).where(User.active==True)) if vis is None or x.id in vis]
     counts=defaultdict(int)
-    for e in db.scalars(select(Attendance).where(Attendance.date==today())): counts[db.get(AttendanceType,e.type_id).icon]+=1
+    for e in db.scalars(select(Attendance).where(Attendance.date==today())):
+        if vis is None or e.user_id in vis: counts[db.get(AttendanceType,e.type_id).icon]+=1
     upcoming=select(LeaveRequest).where(LeaveRequest.status=='approved',LeaveRequest.end_date>=today()).order_by(LeaveRequest.start_date).limit(10)
+    if vis is not None: upcoming=upcoming.where(LeaveRequest.user_id.in_(vis))
     return {'employees':len(all_users),'office':counts['Building2'],'home':counts['House'],'vacation':counts['Palmtree'],'absent':sum(v for k,v in counts.items() if k not in ['Building2','House','Palmtree']),'upcoming':[row(x) for x in db.scalars(upcoming)]}
 @app.get('/api/notifications')
 def notifications(u=Depends(current_user),db:Session=Depends(get_db)):

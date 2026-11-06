@@ -42,17 +42,18 @@ To build the frontends, run `npm ci && npm run build` in `apps/<app>/frontend`. 
 browser ─► gateway (nginx, gateway/nginx.conf, only exposed service)
             ├─ /                      → portal:8000        (FastAPI + static landing page, SQLite in portal_data volume)
             ├─ /workplan/api/         → workplan-api:8000/api/   (FastAPI, SQLAlchemy, Alembic, Postgres 16)
-            ├─ /workplan/             → workplan-ui (React/Tailwind)       [auth_request → portal /auth/me]
+            ├─ /workplan/             → workplan-ui (React/Tailwind)       [auth_request → portal /auth/app/<app>]
             ├─ /vehicle-logbook/api/  → logbook-api:8000/api/    (FastAPI, SQLAlchemy, Alembic, Postgres 17)
-            ├─ /vehicle-logbook/      → logbook-ui (React/MUI)             [auth_request → portal /auth/me]
+            ├─ /vehicle-logbook/      → logbook-ui (React/MUI)             [auth_request → portal /auth/app/<app>]
             └─ /internal/             → 404 (blocked externally)
 ```
 
 **Single sign-on flow** (the main cross-cutting concern):
-- `portal/main.py` is the only place that stores passwords (scrypt) and sessions. It holds four fixed accounts (`PEOPLE`), seeded with `DEMO_PASSWORD` on first start only. Sessions are 12 h, kept in the `kbm_portal_session` HttpOnly cookie. Only a SHA-256 digest of the token is stored. Changing the password deletes every session for that account.
-- nginx protects the UI routes with `auth_request` and redirects a 401 to `/?next=<app>`. The API routes are **not** gated by nginx. Each backend authenticates on its own.
+- `portal/main.py` is the only place that stores passwords (scrypt) and sessions, and it is the source of truth for users, per-app access (`users.apps`) and groups (`groups`, `user_groups`). Four accounts (`PEOPLE`) are seeded with `DEMO_PASSWORD` on first start only; admins add more at `/?admin=1` (`portal/static/admin.js`, `/auth/admin/*`). New users get a 72 h invite link (`invites`) to set their password, optionally e-mailed via `SMTP_*`. `migrate()` upgrades the SQLite schema in place. Sessions are 12 h, kept in the `kbm_portal_session` HttpOnly cookie. Only a SHA-256 digest of the token is stored. Changing the password deletes every session for that account.
+- nginx gates each UI with `auth_request /_access/<app>` → portal `/auth/app/<app>` (401 → login, 403 → `/?denied=1`); redirects are relative (`absolute_redirect off`). Backends call `require_app()` from `portal_sso.py` and read all accounts from `/internal/directory` (`portal_directory()`, cached `PORTAL_DIRECTORY_CACHE_SECONDS`). Workplan creates missing local users and filters calendar/employees/statistics to people sharing a group (`app/directory.py`); admins see everyone.
+- The API routes are **not** gated by nginx. Each backend authenticates on its own.
 - Each backend's `app/portal_sso.py` (identical in both apps) forwards the cookie to `SSO_URL/internal/identity` with the `X-SSO-Key: SSO_INTERNAL_KEY` header. This happens on every protected request, through `current_user` in `workplan/backend/app/security.py` and `vehicle-logbook/backend/app/auth.py`.
-- Users are mapped by **email** in Workplan and by **username** (slug) in the logbook. Workplan overwrites the local name and role from the portal identity on every request. `app/portal_init.py` in each backend creates the four local user rows with random unusable passwords. It runs at container start after `alembic upgrade head`; see each backend's Dockerfile CMD.
+- Users are mapped by **email** in Workplan and by **username** (slug) in the logbook; both are immutable in the portal. Workplan updates the local name and role from the portal identity only when they change. `app/portal_init.py` in each backend creates the four seed rows with random unusable passwords. It runs at container start after `alembic upgrade head`; see each backend's Dockerfile CMD.
 - The original login endpoints in both apps are disabled and return 410.
 - The portal and both APIs reject state-changing requests whose `Origin` or `Sec-Fetch-Site` is cross-site, which gives CSRF protection. The portal limits login attempts by `X-Real-IP`, a header nginx overwrites.
 

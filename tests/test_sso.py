@@ -14,7 +14,7 @@ KEY='a'*64
 def services(tmp_path_factory):
     data=tmp_path_factory.mktemp('sso')
     processes=[]
-    common={**os.environ,'NO_PROXY':'127.0.0.1,localhost','no_proxy':'127.0.0.1,localhost','SSO_INTERNAL_KEY':KEY,'SSO_URL':'http://127.0.0.1:19100','JWT_SECRET':KEY,'DEMO_PASSWORD':PASSWORD,'COOKIE_SECURE':'0','PORTAL_DB':str(data/'portal.sqlite')}
+    common={**os.environ,'NO_PROXY':'127.0.0.1,localhost','no_proxy':'127.0.0.1,localhost','SSO_INTERNAL_KEY':KEY,'SSO_URL':'http://127.0.0.1:19100','JWT_SECRET':KEY,'DEMO_PASSWORD':PASSWORD,'COOKIE_SECURE':'0','PORTAL_DB':str(data/'portal.sqlite'),'PORTAL_DIRECTORY_CACHE_SECONDS':'0'}
     try:
         # Test schemas use ORM metadata because Workplan's frozen migration is PostgreSQL DDL.
         for app in ['workplan','vehicle-logbook']:
@@ -132,3 +132,48 @@ def test_login_attempts_are_limited(services):
         for _ in range(10):
             assert c.post('/auth/login',json={'username':'maros','password':'wrong-password'}).status_code==401
         assert c.post('/auth/login',json={'username':'maros','password':PASSWORD}).status_code==429
+
+
+def test_admin_creates_user_with_app_access_groups_and_invite(services):
+    with client(services) as admin,client(services) as emp:
+        login(admin); login(emp,'zdenko')
+        assert emp.get('/auth/admin/users').status_code==403
+        groups={g['name']:g['id'] for g in admin.get('/auth/admin/groups').json()}
+        assert {'Vedenie','Vývojári','Predaj','Technici','Administratíva','Brigádnici'}<=set(groups)
+        r=admin.post('/auth/admin/users',json={'name':'Jana Nováková','username':'jana','email':'jana@test.local','apps':['vehicle-logbook'],'groups':[groups['Brigádnici']],'send_email':True},headers={'Origin':services['portal']})
+        assert r.status_code==200,r.text
+        body=r.json(); assert not body['emailed'] and 'SMTP' in body['email_error'] and '/?invite=' in body['invite_url']
+        token=body['invite_url'].split('invite=')[1]
+        assert admin.post('/auth/admin/users',json={'name':'Iná','username':'jana','email':'x@test.local'}).status_code==409
+        # pozvánka: nastavenie hesla a prihlásenie
+        assert get(services['portal']+'/auth/invite?token='+token).json()['username']=='jana'
+        assert admin.post('/auth/invite',json={'token':token,'password':'Jana-Heslo-2026!'}).status_code==200
+        assert admin.post('/auth/invite',json={'token':token,'password':'Jana-Heslo-2026!'}).status_code==404   # jednorazový
+    with client(services) as jana:
+        cookies=login(jana,'jana','Jana-Heslo-2026!')
+        me=jana.get('/auth/me').json(); assert me['apps']==['vehicle-logbook'] and me['groups'][0]['name']=='Brigádnici'
+        assert jana.get('/auth/app/vehicle-logbook').status_code==200 and jana.get('/auth/app/workplan').status_code==403
+        assert get(services['logbook']+'/api/me',cookies).status_code==200
+        assert get(services['workplan']+'/api/auth/me',cookies).status_code==403
+
+def test_group_visibility_in_workplan_and_deactivation(services):
+    with client(services) as admin:
+        login(admin)
+        groups={g['name']:g['id'] for g in admin.get('/auth/admin/groups').json()}
+        r=admin.post('/auth/admin/users',json={'name':'Peter Predajca','username':'peter','email':'peter@test.local','apps':['workplan'],'groups':[groups['Predaj']],'send_email':False})
+        token=r.json()['invite_url'].split('invite=')[1]
+        admin.post('/auth/invite',json={'token':token,'password':'Peter-Heslo-2026!'})
+    with client(services) as z, client(services) as p, client(services) as m:
+        zc=login(z,'zdenko'); pc=login(p,'peter','Peter-Heslo-2026!'); mc=login(m)
+        names=lambda c:{u['name'] for u in get(services['workplan']+'/api/employees',c).json()}
+        assert 'Peter Predajca' not in names(zc) and {'Zdenko Sokolovský','Florián Žifčák','Martin Zelenák'}<=names(zc)
+        assert names(pc)=={'Peter Predajca'}
+        assert 'Peter Predajca' in names(mc) and 'Maroš Sokolák' in names(mc)          # admin vidí všetkých
+        # Peter pridaný aj do Vývojárov → vidí sa so Zdenkom
+        assert m.patch('/auth/admin/users/peter',json={'groups':[groups['Predaj'],groups['Vývojári']]},headers={'Origin':services['portal']}).status_code==200
+        assert 'Peter Predajca' in names(zc)
+        # deaktivácia zruší reláciu aj prihlásenie
+        assert m.patch('/auth/admin/users/peter',json={'active':False}).status_code==200
+        assert get(services['workplan']+'/api/auth/me',pc).status_code==401
+        assert p.post('/auth/login',json={'username':'peter','password':'Peter-Heslo-2026!'}).status_code==401
+        assert m.patch('/auth/admin/users/maros',json={'active':False}).status_code==422            # seba nie

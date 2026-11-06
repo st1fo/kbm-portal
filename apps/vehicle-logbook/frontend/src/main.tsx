@@ -380,9 +380,9 @@ function Workspace({account,signOut}:{account:Account;signOut:()=>void}) {
               <Button sx={{mt:2}} variant="outlined" disabled={demoBusy} onClick={()=>void addDemo()}>{demoBusy?'Pripravujem demo…':'Pridať / otvoriť demo dáta'}</Button>
             </Paper>
             <ImportPanel done={id=>{setVehicleId(id);reload('Import bol uložený.');navigate('/');}}/>
-            <div className="section-heading"><h2>Používatelia</h2><span>4 spoločné účty portálu</span></div>
+            <div className="section-heading"><h2>Používatelia</h2><span>Účty a prístup ku Knihe jázd spravuje portál KBM</span></div>
             <Grid data={users} columns={[
-              ['Meno',r=>r.username],['Rola',r=>r.admin?'Správca':'Používateľ'],['Stav',r=>r.active?'Aktívny':'Neaktívny'],
+              ['Meno',r=>r.name??r.username],['Prihlasovacie meno',r=>r.username],['Rola',r=>r.admin?'Správca':'Používateľ'],['Stav',r=>r.active?'Aktívny':'Neaktívny'],
               ['Akcie',r=><Button size="small" onClick={()=>setUserEdit(r)}>Upraviť</Button>],
             ]}/>
             <h2>História zmien</h2><Grid data={audit} columns={[

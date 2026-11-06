@@ -37,7 +37,31 @@ Portál otvára:
 
 Portál vytvorí jednu 12-hodinovú reláciu v HttpOnly cookie na rovnakej adrese. Obe API pri každej chránenej požiadavke overia túto reláciu u portálu cez interný servisný kľúč. Heslo sa neposiela do menších aplikácií ani sa neukladá v prehliadači. Ich pôvodné prihlasovacie API sú vypnuté. Odhlásenie z ktorejkoľvek aplikácie zneplatní spoločnú reláciu aj v druhej aplikácii. Už zobrazená stránka v inej karte môže zostať viditeľná, ale ďalšie požiadavky na jej údaje budú zamietnuté.
 
-Prototyp má štyri pevne pripravené spoločné účty. Pridávanie ďalších účtov ani zmena identity a centrálnej roly nie sú v tejto verzii dostupné. Workplan dovolí upraviť úväzok a aktivitu používateľa; Kniha jázd dovolí aktivitu a priradenie vozidiel. Účty sa párujú e-mailom vo Workplane a prihlasovacím menom v Knihe jázd. Maroš je správca v oboch aplikáciách. Ostatní majú v Knihe jázd prístup len k vozidlám, ktoré im správca priradí v Nastaveniach.
+Na začiatku existujú štyri účty (Maroš je správca). Ďalších ľudí pridáva administrátor v portáli tlačidlom **Správa používateľov** (vpravo hore). Workplan dovolí upraviť úväzok a aktivitu používateľa; Kniha jázd dovolí aktivitu a priradenie vozidiel. Účty sa párujú e-mailom vo Workplane a prihlasovacím menom v Knihe jázd, preto sa e-mail ani prihlasovacie meno po vytvorení nemenia. Bežní používatelia majú v Knihe jázd prístup len k vozidlám, ktoré im správca priradí v Nastaveniach.
+
+## Správa používateľov, prístupov a skupín
+
+Administrátor v portáli (`/?admin=1`):
+
+- **pridá používateľa**: meno, prihlasovacie meno, e-mail, aplikácie, skupiny a voliteľne rolu administrátora. Heslo nikto nevymýšľa: portál vytvorí jednorazový **pozývací odkaz** platný 72 hodín, cez ktorý si človek nastaví vlastné heslo. Ak je nastavené SMTP, odkaz príde e-mailom, inak ho admin skopíruje a pošle sám. Rovnako funguje **Nový odkaz na heslo** pri zabudnutom hesle;
+- **pridelí prístup k aplikáciám** (Workplan, Kniha jázd). Bez prístupu sa karta aplikácie na hlavnej stránke nezobrazí, nginx nepustí rozhranie (presmeruje na portál s upozornením) a API aplikácie vráti 403. Zmena platí okamžite;
+- **zaradí do skupín**. Úvodné skupiny sú Vedenie, Vývojári, Predaj, Technici, Administratíva a Brigádnici; ďalšie sa dajú pridať, premenovať alebo zmazať. Človek môže byť vo viacerých skupinách. **Vo Workplane zamestnanec vidí v kalendári, prehľade a zozname ľudí iba seba a členov svojich skupín**, administrátor vidí všetkých. Kalendár má filter podľa skupiny;
+- **deaktivuje účet**: okamžite zruší všetky relácie a prihlásenie.
+
+Zmeny sa zapisujú do histórie v správe používateľov. Nový používateľ sa vo Workplane aj v Knihe jázd objaví hneď (aplikácie si zoznam ľudí berú z portálu cez interné `/internal/directory`), takže mu admin môže naplánovať dochádzku alebo priradiť vozidlo ešte pred prvým prihlásením.
+
+E-maily (voliteľné) v `.env`, napr. bezplatný Gmail s [heslom aplikácie](https://myaccount.google.com/apppasswords):
+
+```
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=vas.ucet@gmail.com
+SMTP_PASSWORD=heslo-aplikacie-16-znakov
+SMTP_FROM=KBM portál <vas.ucet@gmail.com>
+PUBLIC_URL=https://kbm.<váš-tailnet>.ts.net
+```
+
+Po úprave `.env` spustite `docker compose up -d --build`.
 
 Workplan začína bez dochádzky a dovoleniek. Kniha jázd začína bez vozidiel; môžete ich vytvoriť, importovať Excel alebo použiť pôvodné tlačidlo na pridanie demo dát. Doterajšie funkcie aplikácií sú súčasťou balíka.
 

@@ -16,15 +16,13 @@ bearer = HTTPBearer()
 def token(user):
     return jwt.encode({'sub': str(user.id), 'iat': datetime.now(timezone.utc), 'exp': datetime.now(timezone.utc)+timedelta(hours=8)}, SECRET, algorithm='HS256')
 def current_user(request: Request, db: Session = Depends(get_db)):
-    from .portal_sso import portal_identity
-    from sqlalchemy import select
+    from .portal_sso import portal_identity, require_app
+    from .directory import ensure_user
     identity=portal_identity(request)
-    user=db.scalar(select(User).where(User.email==identity['email']))
-    if not user:
-        raise HTTPException(403, 'Účet nie je priradený k Workplanu.')
+    require_app(identity,'workplan')
+    user=ensure_user(db,identity)  # nový účet z portálu sa založí pri prvej požiadavke
     if not user.active: raise HTTPException(403, 'Účet je deaktivovaný vo Workplane.')
-    user.name=identity['name']; user.role='admin' if identity['admin'] else 'employee'
-    db.commit()
+    user.group_ids={g['id'] for g in identity.get('groups',[])}
     return user
 def admin(user=Depends(current_user)):
     if user.role != 'admin': raise HTTPException(403, 'Vyžaduje sa administrátor.')

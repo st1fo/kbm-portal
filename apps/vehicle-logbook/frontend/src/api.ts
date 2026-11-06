@@ -5,7 +5,7 @@ export type Value = string | number | boolean | null | undefined;
 export type Row = Record<string, Value> & { id?: number };
 export type Entry = Row & { warnings: string[] };
 export type Report = Row & { rows: Entry[] };
-export type Account = { id?: number; username: string; admin: boolean; active?: boolean; vehicle_ids?: number[] };
+export type Account = { id?: number; username: string; name?: string; admin: boolean; active?: boolean; vehicle_ids?: number[] };
 export type Preview = { digest: string; vehicle: Row; trips: Row[]; purchases: Row[];
   destinations: Row[]; holidays: string[]; warnings: string[]; duplicate: boolean };
 export function errorText(error: unknown) {

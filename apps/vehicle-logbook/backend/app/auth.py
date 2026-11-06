@@ -37,8 +37,9 @@ def login(db, response, user):
                         samesite="strict", max_age=43200, path="/api")
 
 def current_user(request: Request, db=Depends(db_session)):
-    from .portal_sso import portal_identity
+    from .portal_sso import portal_identity, require_app
     identity=portal_identity(request)
+    require_app(identity,'vehicle-logbook')
     user=db.scalar(select(User).where(User.username==identity['slug']))
     if not user:
         user=User(username=identity['slug'],password=hash_password(secrets.token_urlsafe(32)),admin=bool(identity['admin']),active=True)
@@ -53,3 +54,21 @@ def administrator(user=Depends(current_user)):
     if not user.admin:
         raise HTTPException(403, "Túto akciu môže vykonať iba administrátor.")
     return user
+
+
+def sync_directory(db):
+    """Účty portálu s prístupom ku Knihe jázd {username: záznam}; chýbajúce lokálne riadky sa doplnia, aby im admin
+    mohol priradiť vozidlá ešte pred prvým prihlásením. None = portál nedostupný."""
+    from .portal_sso import portal_directory
+    directory = portal_directory()
+    if directory is None:
+        return None
+    people = {p["slug"]: p for p in directory if p["active"] and "vehicle-logbook" in p["apps"]}
+    existing = {u.username: u for u in db.scalars(select(User))}
+    for slug, p in people.items():
+        if slug not in existing:
+            db.add(User(username=slug, password=hash_password(secrets.token_urlsafe(32)), admin=bool(p["admin"]), active=True))
+        elif existing[slug].admin != bool(p["admin"]):
+            existing[slug].admin = bool(p["admin"])
+    db.commit()
+    return people

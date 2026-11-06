@@ -16,16 +16,26 @@ from app.security import hasher
 from app import portal_sso
 from openpyxl import load_workbook
 
+# Adresár portálu v testoch: u1–u3 sú v spoločnej skupine „Tím“ a majú prístup k Workplanu.
+DIRECTORY=[]
+def person(i,groups=(1,),apps=('workplan',),active=True):
+    email=f'u{i}@test.local'
+    return {'slug':f'u{i}','name':f'User {i}','email':email,'admin':i==1,'active':active,'apps':list(apps),'groups':[{'id':g,'name':f'Skupina {g}'} for g in groups]}
 def fake_identity(request):
-    """Náhrada portálového SSO: identitu určí hlavička X-Test-Email (u1 je správca)."""
+    """Náhrada portálového SSO: identitu určí hlavička X-Test-Email (u1 je správca), prístupy a skupiny z DIRECTORY."""
     email=request.headers.get('x-test-email')
     if not email: raise HTTPException(401,'Prihláste sa do portálu KBM.')
+    known=next((p for p in DIRECTORY if p['email']==email),None)
+    if known: return {k:v for k,v in known.items() if k!='active'}
     i=email[1:].split('@')[0]
     return {'email':email,'name':'User '+i if email.endswith('@test.local') else email,'admin':email=='u1@test.local'}
 
 @pytest.fixture()
 def client(monkeypatch):
+    from app import directory
+    DIRECTORY[:]=[person(i) for i in range(1,4)]
     monkeypatch.setattr(portal_sso,'portal_identity',fake_identity)
+    monkeypatch.setattr(directory,'portal_directory',lambda max_age=None: DIRECTORY)
     url=os.getenv('TEST_DATABASE_URL','sqlite://')
     engine=create_engine(url,connect_args={'check_same_thread':False} if url=='sqlite://' else {},**({'poolclass':StaticPool} if url=='sqlite://' else {}))
     Base.metadata.drop_all(engine); Base.metadata.create_all(engine)
@@ -33,6 +43,10 @@ def client(monkeypatch):
         for i in range(1,4):db.add(User(id=i,name='User '+str(i),email=f'u{i}@test.local',role='admin' if i==1 else 'employee',password_hash=hasher.hash('password-test-123')))
         db.add_all([AttendanceType(id=1,name='Office',icon='Building2',color='#123456'),AttendanceType(id=2,name='Home',icon='House',color='#123456'),AttendanceType(id=3,name='Vacation',icon='Palmtree',color='#123456',requires_approval=True)])
         db.commit()
+        if engine.dialect.name=='postgresql':  # pevné ID vo fixtúre → posunúť sekvencie, aby nové riadky nekolidovali
+            from sqlalchemy import text
+            for table in ['users','attendance_types']: db.execute(text(f"SELECT setval(pg_get_serial_sequence('{table}','id'),(SELECT max(id) FROM {table}))"))
+            db.commit()
     def override():
         with Session(engine) as db: yield db
     app.dependency_overrides[get_db]=override;login_attempts.clear()
@@ -44,8 +58,10 @@ def plan(**kwargs):
     p={'user_id':2,'type_id':1,'start_date':'2026-11-02','end_date':'2026-11-02','start':'08:00','end':'16:30'};p.update(kwargs);return p
 
 def test_authentication(client):
-    # Pôvodne JWT prihlásenie; pri SSO: bez relácie 401, neznámy účet 403, staré prihlásenie 410.
+    # Pôvodne JWT prihlásenie; pri SSO: bez relácie 401, účet bez prístupu k Workplanu 403, staré prihlásenie 410.
+    # (Účet z portálu s prístupom sa už neodmieta, ale založí – test_new_portal_account_is_created_automatically.)
     assert client.get('/api/auth/me').status_code==401
+    DIRECTORY.append({**person(8,apps=('vehicle-logbook',)),'email':'nobody@test.local'})
     assert client.get('/api/auth/me',headers={'X-Test-Email':'nobody@test.local'}).status_code==403
     assert client.get('/api/auth/me',headers=auth(client,2)).json()['id']==2
     assert client.post('/api/auth/login',json={'email':'u2@test.local','password':'wrong'}).status_code==410
@@ -124,3 +140,26 @@ def test_employee_deactivation(client):
     # Pôvodne 401 pre zneplatnený JWT; pri SSO portál reláciu pozná, Workplan odmietne deaktivovaný účet.
     assert client.get('/api/auth/me',headers=employee).status_code==403
     assert client.put('/api/employees/1',headers=h,json={**p,'email':'u1@test.local'}).status_code==422
+
+
+def test_group_visibility_and_app_access(client):
+    # u3 presunieme do inej skupiny: u2 ho prestane vidieť, admin vidí všetkých
+    DIRECTORY[2]=person(3,groups=(2,))
+    client.post('/api/attendance',headers=auth(client,3),json=plan(user_id=3))
+    client.post('/api/attendance',headers=auth(client,2),json=plan(user_id=2))
+    seen=lambda i:{e['user_id'] for e in client.get('/api/calendar?month=2026-11',headers=auth(client,i)).json()['entries']}
+    assert seen(2)=={2} and seen(3)=={3} and seen(1)=={2,3}
+    assert [e['id'] for e in client.get('/api/employees',headers=auth(client,2)).json()]==[1,2]
+    assert client.get('/api/employees',headers=auth(client,2)).json()[1]['groups']==['Skupina 1']
+    assert client.get('/api/statistics?month=2026-11',headers=auth(client,2)).json()['employees']==2
+    # bez prístupu k Workplanu: 403 a človek zmizne zo zoznamov
+    DIRECTORY[2]=person(3,apps=('vehicle-logbook',))
+    assert client.get('/api/auth/me',headers=auth(client,3)).status_code==403
+    assert 3 not in [e['id'] for e in client.get('/api/employees',headers=auth(client)).json()]
+
+def test_new_portal_account_is_created_automatically(client):
+    DIRECTORY.append({**person(9),'email':'nova@test.local','slug':'nova','name':'Nová Kolegyňa'})
+    names=[e['name'] for e in client.get('/api/employees',headers=auth(client)).json()]
+    assert 'Nová Kolegyňa' in names                       # admin ju vidí hneď, aj pred prvým prihlásením
+    me=client.get('/api/auth/me',headers={'X-Test-Email':'nova@test.local'}).json()
+    assert me['name']=='Nová Kolegyňa' and me['role']=='employee' and me['daily_hours']==8

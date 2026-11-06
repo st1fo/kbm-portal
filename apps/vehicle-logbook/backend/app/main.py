@@ -362,15 +362,17 @@ def export(identifier: int,year: int=Query(ge=1900,le=9998),month: int | None=Qu
 
 @app.get("/api/users")
 def users(db=Db,user=Admin):
+    from .auth import sync_directory
+    people = sync_directory(db)   # iba účty s prístupom ku Knihe jázd podľa portálu
     access = list(db.scalars(select(Access)))
-    return [{"id":r.id,"username":r.username,"admin":r.admin,"active":r.active,
+    return [{"id":r.id,"username":r.username,"name":(people or {}).get(r.username,{}).get("name",r.username),"admin":r.admin,"active":r.active,
              "vehicle_ids":[a.vehicle_id for a in access if a.user_id == r.id]}
-            for r in db.scalars(select(User).order_by(User.username))]
+            for r in db.scalars(select(User).order_by(User.username)) if people is None or r.username in people]
 
 @app.post("/api/users")
 @app.put("/api/users/{identifier}")
 def save_user(data: UserIn,identifier: int | None=None,db=Db,user=Admin):
-    if identifier is None: fail("Prototyp používa štyri spoločné účty portálu.",409)
+    if identifier is None: fail("Účty sa pridávajú v portáli KBM (Správa používateľov).",409)
     existing=db.get(User,identifier)
     if existing and (data.username != existing.username or data.admin != existing.admin or data.password): fail("Identitu, rolu a heslo spravuje spoločný portál.",409)
     if identifier == user.id and (not data.admin or not data.active):
