@@ -28,7 +28,7 @@ export function CommandBar({ state, queue, problem, onPunch, onRetry, skewMin }:
       <span className="j-status-pill"><i />{STATUS_TEXT[st]}{overnight ? ' · zmena od ' + dayLabel(state!.active_day) : ''}{c && c.count > 1 && (st === 'in' || st === 'break') ? ' · úsek ' + c.count : ''}</span>
       <div className="j-today">Dnes v práci: <strong>{fmtDur(c?.work ?? 0)}</strong></div>
     </div>
-    <div className="j-controls">
+    <div className="j-controls" data-tour="punch">
       {st === 'out' && btn('Pípnuť príchod', 'in', 'go', LogIn)}
       {st === 'in' && [btn('Prestávka', 'break', 'pause', Coffee), btn('Pípnuť odchod', 'out', 'stop', LogOut)]}
       {st === 'break' && [btn('Koniec prestávky', 'in', 'go', LogIn), btn('Pípnuť odchod', 'out', 'stop', LogOut)]}

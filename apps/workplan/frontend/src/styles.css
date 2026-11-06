@@ -14,10 +14,26 @@
 @media(max-width:640px){.team-bar{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;margin-bottom:16px}.team-bar button{flex:none}}
 
 /* úprava čitateľnosti: odkaz na portál, upozornenie na žiadosti, Prehľad „Kto je dnes kde“ */
-.portal-link{display:inline-flex;align-items:center;gap:4px;color:#d9e0dc;font-size:13px;font-weight:600;border:1px solid #4a554f;border-radius:8px;padding:6px 10px 6px 6px;flex-shrink:0}.portal-link:hover{color:#fff;border-color:#e7b45f}
+.portal-link{display:inline-flex;align-items:center;gap:8px;color:#2d2e2b;background:#f2c94c;font-size:14px;font-weight:700;border-radius:9px;padding:9px 14px;flex-shrink:0;box-shadow:0 2px 8px #0003}.portal-link:hover{background:#ffd95e;color:#1f201d}
 .pending-banner{display:flex;align-items:center;gap:12px;width:100%;margin-top:18px;padding:15px 20px;border:1px solid #ecd98a;background:#fff8dc;color:#5e5026;border-radius:12px;font-size:15px;text-align:left}.pending-banner span{flex:1}.pending-banner b{display:flex;align-items:center;gap:6px;font-size:14px}.pending-banner:hover{background:#fff2c2}
 .today-panel{margin-bottom:20px}.list-row .count{display:inline-block;font-size:12px;font-weight:600;color:#6b766f;background:#eef1ef;border-radius:99px;padding:1px 8px;margin-left:6px}.list-row small{font-size:14px;color:#5f6a64;line-height:1.5}
 .audit-detail{max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#7a857f}
 .calendar thead th{width:auto}
 @media(max-width:640px){.calendar .employee-col,.calendar thead .employee-col{width:128px;padding:10px 8px}.employee-cell .avatar{display:none}.employee-cell>div small{display:none}.employee-cell>div{font-size:13px;line-height:1.3}.calendar{min-width:1150px}.calendar td{height:64px}.calendar thead .employee-col small{display:none}}
 @media(max-width:640px){.employee-cell>div{white-space:normal;overflow-wrap:anywhere}.employee-cell>div b{display:none}}
+
+/* návod (tour) */
+.help-button{color:#cfd6d2;display:grid;place-items:center}.help-button:hover{color:#f2c94c}
+.tour{position:fixed;inset:0;z-index:1000}
+.tour-shade{position:fixed;inset:0}.tour-shade.full{background:#151a18b3}
+.tour-spot{position:fixed;border-radius:12px;box-shadow:0 0 0 3px #f2c94c,0 0 0 9999px #151a18b3;pointer-events:none;transition:top .25s,left .25s,width .25s,height .25s}
+.tour-card{position:fixed;width:min(380px,calc(100vw - 32px));background:#fff;color:#29332f;border-radius:14px;padding:20px 22px 18px;box-shadow:0 20px 50px #0006}
+.tour-card.centered{top:50%;left:50%;transform:translate(-50%,-50%);width:min(440px,calc(100vw - 32px))}
+.tour-card.sheet{left:12px;right:12px;bottom:12px;width:auto}
+.tour-card h2{font-size:20px;margin:12px 0 8px;letter-spacing:-.3px}
+.tour-card p{font-size:15px;line-height:1.55;color:#4f5a54;margin:0 0 18px}
+.tour-progress{display:flex;gap:4px}.tour-progress i{flex:1;height:4px;border-radius:2px;background:#e5e9e6}.tour-progress i.on{background:#e2b93b}
+.tour-buttons{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tour-skip{background:none;border:0;color:#6b766f;font-size:14px;text-decoration:underline;padding:6px 0;margin-right:auto}
+.tour-count{font-size:13px;color:#8a948e}.tour-skip+.tour-count{margin-right:4px}.tour-buttons>.tour-count:first-child{margin-right:auto}
+@media(max-width:640px){.portal-link{padding:8px 11px;font-size:13px}}

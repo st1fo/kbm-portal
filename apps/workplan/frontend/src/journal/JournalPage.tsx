@@ -57,7 +57,7 @@ export function JournalPage({ me, users, isAdmin, notify }: { me: User; users: U
     {shownError && <div role="alert" className="error">{shownError}<button onClick={() => { setError(''); q.clearError(); }}>Zavrieť</button></div>}
     {state.isError && <div role="alert" className="error">Stav dochádzky sa nepodarilo načítať. <button onClick={() => void state.refetch()}>Skúsiť znova</button></div>}
     {!viewUid && <CommandBar state={state.data} queue={q.queue} problem={q.problem} skewMin={state.data?.skew_min ?? 0} onPunch={q.punch} onRetry={() => void q.retry()} />}
-    <nav className="j-tabs" aria-label="Časti denníka">
+    <nav className="j-tabs" data-tour="journal-tabs" aria-label="Časti denníka">
       {TABS.map(([key, label, Icon, hint]) => <button key={key} className={tab === key ? 'on' : ''} aria-pressed={tab === key} onClick={() => setTab(key)}><Icon size={18} /><span>{label}<small>{hint}</small></span></button>)}
     </nav>
     {tab === 'today' && <>
