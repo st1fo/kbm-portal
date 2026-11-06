@@ -103,7 +103,22 @@ export function MonthOverview({ uid, month, setMonth, attDate, setAttDate, onErr
         </button>;
       })}
     </div>
-    <div className="j-legend"><span><i className="lg-log" />odpísané v aktivitách</span><span><i className="lg-work" />v práci</span></div>
+    <div className="j-mcal" aria-label={'Dochádzka · ' + monthName(month)}>
+      {DAY_NAMES.map(n => <span key={n} className="j-mcal-h">{n}</span>)}
+      {days.length > 0 && Array.from({ length: weekday(days[0].date) }, (_, k) => <span key={'x' + k} />)}
+      {days.map(d => {
+        const has = d.worked_min > 0, lp = has ? Math.min(100, Math.round(d.logged_min / d.worked_min * 100)) : 0;
+        return <button key={d.date} aria-label={`${dayLabel(d.date)} ${has ? 'v práci ' + fmtDur(d.worked_min) + ', odpísané ' + fmtDur(d.logged_min) : 'bez záznamu'}`}
+          className={'j-mcell' + (has ? ' has' : '') + (d.weekend || d.holiday ? ' we' : '') + (d.date === now.date ? ' today' : '') + (d.date === attDate ? ' sel' : '')}
+          style={has ? { background: `rgba(52,110,87,${(0.12 + 0.38 * Math.min(1, d.worked_min / max)).toFixed(2)})` } : undefined}
+          onClick={() => d.segments.length ? openEdit(d.date) : setAttDate(d.date)}>
+          <b>{Number(d.date.slice(8))}</b>
+          <span>{has ? fmtShort(d.worked_min) : ''}</span>
+          {has && <i style={{ width: lp + '%' }} />}
+        </button>;
+      })}
+    </div>
+    <div className="j-legend"><span><i className="lg-log" />odpísané v aktivitách</span><span className="j-legend-cal"><i className="lg-cal" />v práci (tmavšie = viac hodín)</span><span className="j-legend-bar"><i className="lg-work" />v práci</span></div>
     <div className="j-hist-bar">
       <span className="j-lbl">Dni · {mShort} · klikni na deň a uprav</span>
       <span className="j-row">
