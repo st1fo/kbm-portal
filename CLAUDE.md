@@ -57,6 +57,8 @@ browser ─► gateway (nginx, gateway/nginx.conf, only exposed service)
 - The original login endpoints in both apps are disabled and return 410.
 - The portal and both APIs reject state-changing requests whose `Origin` or `Sec-Fetch-Site` is cross-site, which gives CSRF protection. The portal limits login attempts by `X-Real-IP`, a header nginx overwrites.
 
+Workplan admins can hide pages (Dochádzka/Denník/Prehľad/Žiadosti) per portal group or per person (`app/pages.py`, setting `page_access`; personal setting wins, otherwise union of groups, unconfigured group = all). `current_user` enforces it on the API via `check_request`, and `/api/auth/me` returns `pages` for the menu.
+
 Workplan's Denník has kanban boards (`app/boards.py`, migration 0004 moved the old `todos` into a personal board „Moje úlohy“; frontend `journal/Board*.tsx` with `@dnd-kit`). A board without members is personal; members see and edit cards and columns, only the owner (or an admin) changes settings, members or deletes it. Cards are deliberately not linked to Denník tasks/time; „Zapísať ako aktivitu“ only prefills the activity form.
 
 All three UIs share a light/dark theme: `localStorage['kbm-theme']` (`light`/`dark`/`auto`) → `data-theme` on `<html>`, applied before paint by a small non-inline script (CSP forbids inline) and switched from the top bar. Use the CSS tokens on `:root` in `apps/workplan/frontend/src/styles.css` instead of hex colours.

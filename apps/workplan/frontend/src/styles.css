@@ -77,3 +77,4 @@
 .account{gap:3px}
 .account>button{padding:5px}
 }
+.page-access>.muted{margin:-4px 0 14px;max-width:900px}.pa-actions{display:flex;gap:8px}.pa-sub{margin:18px 0 8px;font-size:14px;color:var(--ink)}.pa-table td small.pa-note{display:block;color:var(--muted);font-size:12px;margin-top:2px}.pa-cell{text-align:center;width:110px}.pa-cell input{width:18px;height:18px;accent-color:var(--link);cursor:pointer}.pa-cell input:disabled{cursor:default;opacity:.55}.pa-table select{padding:6px 8px;font-size:13px}.pa-own td{background:var(--accent-tint)}

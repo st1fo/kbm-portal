@@ -23,6 +23,8 @@ def current_user(request: Request, db: Session = Depends(get_db)):
     user=ensure_user(db,identity)  # nový účet z portálu sa založí pri prvej požiadavke
     if not user.active: raise HTTPException(403, 'Účet je deaktivovaný vo Workplane.')
     user.group_ids={g['id'] for g in identity.get('groups',[])}
+    from .pages import check_request
+    check_request(request,db,user)  # skryté podstránky (Administrácia → Viditeľnosť podstránok)
     return user
 def admin(user=Depends(current_user)):
     if user.role != 'admin': raise HTTPException(403, 'Vyžaduje sa administrátor.')
