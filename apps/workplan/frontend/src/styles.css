@@ -78,3 +78,24 @@
 .account>button{padding:5px}
 }
 .page-access>.muted{margin:-4px 0 14px;max-width:900px}.pa-actions{display:flex;gap:8px}.pa-sub{margin:18px 0 8px;font-size:14px;color:var(--ink)}.pa-table td small.pa-note{display:block;color:var(--muted);font-size:12px;margin-top:2px}.pa-cell{text-align:center;width:110px}.pa-cell input{width:18px;height:18px;accent-color:var(--link);cursor:pointer}.pa-cell input:disabled{cursor:default;opacity:.55}.pa-table select{padding:6px 8px;font-size:13px}.pa-own td{background:var(--accent-tint)}
+/* absencia na časť dňa v kalendári */
+.calendar-cell{position:relative}
+.part-dot{position:absolute;right:3px;top:3px;width:7px;height:7px;border-radius:50%;box-shadow:0 0 0 1.5px var(--surface)}
+.part-dot.wait{outline:1.5px dashed var(--muted);outline-offset:1px}
+/* výkaz hodín */
+.hours-panel{margin-top:20px}
+.hours-table .num{text-align:right}
+.hours-table td.plus{color:var(--ok-ink)}
+.hours-table td.minus{color:var(--danger)}
+.hours-name{display:inline-flex;align-items:center;gap:6px;background:none;border:0;padding:0;font:inherit;color:var(--text);cursor:pointer;text-align:left}
+.hours-name svg{color:var(--muted);transition:transform .15s}
+.hours-table tr.open .hours-name svg{transform:rotate(180deg)}
+.hours-name small{color:var(--muted);font-size:12px;margin-left:4px}
+.hours-warn{display:inline-flex;align-items:center;gap:4px;color:var(--warn);font-weight:600}
+.hours-detail td{background:var(--surface-2);padding:10px 14px;white-space:normal}
+.hours-detail ul{list-style:none;margin:0;padding:0;display:grid;gap:4px;font-size:13px}
+.hours-detail li{display:flex;flex-wrap:wrap;gap:4px 12px;padding:4px 6px;border-radius:5px}
+.hours-detail li.warn{background:var(--warn-soft)}
+.hd-date{min-width:84px;font-weight:600}
+.hd-abs{color:var(--primary-text)}
+.hd-flag{color:var(--warn)}

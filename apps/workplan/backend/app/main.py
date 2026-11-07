@@ -12,11 +12,12 @@ from .db import get_db
 from .models import User, AttendanceType, Attendance, LeaveRequest, Holiday, Notification, Audit, Setting
 from .schemas import Login, Employee, TypeInput, Plan, Review, SettingsInput, HolidayInput
 from .security import current_user, admin, token, hasher
-from .common import TZ, today, row, audit, commit, owner, employee, days, month_bounds, get_settings, working_dates
+from .common import TZ, today, row, audit, commit, owner, employee, days, month_bounds, get_settings, working_dates, is_work
 from .journal import router as journal_router
 from .boards import router as boards_router
 from .pages import router as pages_router, allowed_pages
 from .journal_ai import router as ai_router
+from .hours import router as hours_router
 from .purge import router as purge_router
 from .directory import visible_user_ids, group_names, restrict_to_group
 
@@ -25,6 +26,7 @@ app.include_router(journal_router)
 app.include_router(boards_router)
 app.include_router(pages_router)
 app.include_router(ai_router)
+app.include_router(hours_router)
 app.include_router(purge_router)
 login_attempts=defaultdict(deque)
 def notify_admins(db,message):
@@ -34,6 +36,10 @@ def request_conflict(db,uid,start,end,exclude=None):
     q=select(LeaveRequest).where(LeaveRequest.user_id==uid,LeaveRequest.status.in_(['pending','approved']),LeaveRequest.start_date<=end,LeaveRequest.end_date>=start)
     if exclude: q=q.where(LeaveRequest.id!=exclude)
     if db.scalar(q): raise HTTPException(409,'V rozsahu už existuje žiadosť. Najprv ju zrušte.')
+def full_day_absence(db,uid,d):
+    e=db.scalar(select(Attendance).where(Attendance.user_id==uid,Attendance.date==d))
+    t=db.get(AttendanceType,e.type_id) if e else None
+    if t and not is_work(t): raise HTTPException(409,f'Dňa {d:%d.%m.%Y} je už celodenná absencia ({t.name}).')
 def apply_plan(db,p,request_id=None):
     dates=working_dates(db,p.start_date,p.end_date) if request_id else list(days(p.start_date,p.end_date))
     if not dates: raise HTTPException(422,'Rozsah neobsahuje pracovný deň.')
@@ -111,8 +117,9 @@ def edit_type(tid:int,p:TypeInput,u=Depends(admin),db:Session=Depends(get_db)):
 def calendar_data(month:str,u=Depends(current_user),db:Session=Depends(get_db)):
     start,end=month_bounds(month); vis=visible_user_ids(db,u)
     entries=select(Attendance).where(Attendance.date.between(start,end)); pending=select(LeaveRequest).where(LeaveRequest.status=='pending',LeaveRequest.start_date<=end,LeaveRequest.end_date>=start)
-    if vis is not None: entries=entries.where(Attendance.user_id.in_(vis)); pending=pending.where(LeaveRequest.user_id.in_(vis))
-    return {'entries':[row(x) for x in db.scalars(entries)], 'requests':[row(x) for x in db.scalars(pending)], 'holidays':[row(x) for x in db.scalars(select(Holiday).where(Holiday.date.between(start,end)))], 'settings':get_settings(db)}
+    partial=select(LeaveRequest).where(LeaveRequest.status=='approved',LeaveRequest.hours.is_not(None),LeaveRequest.start_date.between(start,end))
+    if vis is not None: entries=entries.where(Attendance.user_id.in_(vis)); pending=pending.where(LeaveRequest.user_id.in_(vis)); partial=partial.where(LeaveRequest.user_id.in_(vis))
+    return {'entries':[row(x) for x in db.scalars(entries)], 'requests':[row(x) for x in db.scalars(pending)], 'partial':[row(x) for x in db.scalars(partial)], 'holidays':[row(x) for x in db.scalars(select(Holiday).where(Holiday.date.between(start,end)))], 'settings':get_settings(db)}
 @app.post('/api/attendance')
 def save_attendance(p:Plan,u=Depends(current_user),db:Session=Depends(get_db)):
     owner(u,p.user_id); employee(db,p.user_id)
@@ -142,7 +149,11 @@ def add_request(p:Plan,u=Depends(current_user),db:Session=Depends(get_db)):
     if not t or not t.active or not t.requires_approval: raise HTTPException(422,'Kategória nevyžaduje žiadosť.')
     request_conflict(db,p.user_id,p.start_date,p.end_date)
     if not working_dates(db,p.start_date,p.end_date): raise HTTPException(422,'Rozsah neobsahuje pracovný deň.')
-    r=LeaveRequest(user_id=p.user_id,type_id=p.type_id,start_date=p.start_date,end_date=p.end_date,note=p.note)
+    if p.hours is not None:
+        person=db.get(User,p.user_id)
+        if p.hours>=person.daily_hours: raise HTTPException(422,f'Absencia na {p.hours:g} h trvá celý deň ({person.daily_hours:g} h). Zrušte počet hodín.')
+        full_day_absence(db,p.user_id,p.start_date)
+    r=LeaveRequest(user_id=p.user_id,type_id=p.type_id,start_date=p.start_date,end_date=p.end_date,hours=p.hours,note=p.note)
     db.add(r); notify_admins(db,f'{u.name}: nová žiadosť o absenciu.'); audit(db,u,'request.create',p.model_dump()); commit(db); return row(r)
 @app.post('/api/requests/{rid}/review')
 def review(rid:int,p:Review,u=Depends(admin),db:Session=Depends(get_db)):
@@ -152,7 +163,9 @@ def review(rid:int,p:Review,u=Depends(admin),db:Session=Depends(get_db)):
     if r.status!='pending': raise HTTPException(409,'Žiadosť už bola vybavená.')
     if p.status=='approved':
         employee(db,r.user_id)
-        apply_plan(db,Plan(user_id=r.user_id,type_id=r.type_id,start_date=r.start_date,end_date=r.end_date,note=r.note,replace=True),r.id)
+        # časť dňa plán nenahrádza (deň ostáva napr. Kancelária), výkaz hodín ju odpočíta z odpracovaného času
+        if r.hours is not None: full_day_absence(db,r.user_id,r.start_date)
+        else: apply_plan(db,Plan(user_id=r.user_id,type_id=r.type_id,start_date=r.start_date,end_date=r.end_date,note=r.note,replace=True),r.id)
     r.status=p.status; r.reason=p.reason; r.reviewed_by=u.id; r.reviewed_at=datetime.now(TZ)
     db.add(Notification(user_id=r.user_id,message=f'Vaša žiadosť {r.start_date:%d.%m.} – {r.end_date:%d.%m.}: '+('schválená' if p.status=='approved' else 'zamietnutá')+'. '+p.reason))
     audit(db,u,'request.'+p.status,rid); commit(db); return row(r)

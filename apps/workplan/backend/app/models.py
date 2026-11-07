@@ -42,13 +42,15 @@ class LeaveRequest(Base):
     type_id: Mapped[int] = mapped_column(ForeignKey('attendance_types.id'))
     start_date: Mapped[DateType]
     end_date: Mapped[DateType]
+    hours: Mapped[float | None] = mapped_column(default=None)   # časť dňa (napr. lekár 2 h); None = celé dni
     note: Mapped[str] = mapped_column(String(2000), default='')
     status: Mapped[str] = mapped_column(String(20), default='pending')
     reason: Mapped[str] = mapped_column(String(2000), default='')
     reviewed_by: Mapped[int | None] = mapped_column(ForeignKey('users.id'))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    __table_args__ = (CheckConstraint('end_date >= start_date'), CheckConstraint("status IN ('pending','approved','rejected')"))
+    __table_args__ = (CheckConstraint('end_date >= start_date'), CheckConstraint("status IN ('pending','approved','rejected')"),
+                      CheckConstraint('hours IS NULL OR (hours > 0 AND hours <= 24 AND start_date = end_date)', name='ck_leave_requests_hours'))
 class Holiday(Base):
     __tablename__ = 'public_holidays'
     date: Mapped[DateType] = mapped_column(primary_key=True)

@@ -33,3 +33,6 @@ def get_settings(db):
 def working_dates(db,start,end):
     holidays=set(db.scalars(select(Holiday.date).where(Holiday.date.between(start,end))))
     return [d for d in days(start,end) if d.weekday() not in get_settings(db)['weekends'] and d not in holidays]
+# Kategórie, ktoré sa rátajú ako práca (aj kategórie pridané v administrácii s rovnakou ikonou).
+WORK_ICONS=('Building2','House','Plane','GraduationCap')
+def is_work(t): return bool(t and (t.counts_as_work or t.icon in WORK_ICONS))

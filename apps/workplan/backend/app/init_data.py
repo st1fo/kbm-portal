@@ -2,8 +2,7 @@ from sqlalchemy import select
 import holidays
 from .db import SessionLocal
 from .models import AttendanceType, Setting, Holiday
-# Kategórie, ktoré sa v Denníku rátajú ako pracovný deň (očakávané hodiny > 0).
-WORK_ICONS=('Building2','House','Plane','GraduationCap')
+from .common import WORK_ICONS  # kategórie, ktoré sa rátajú ako pracovný deň
 def init_reference(db):
     types=[('Kancelária','Building2','#2f806c',False),('Práca z domu','House','#557cb7',False),('Dovolenka','Palmtree','#c19437',True),('PN','HeartPulse','#cb6870',True),('Lekár','Stethoscope','#aa79be',True),('Služobná cesta','Plane','#49a0af',True),('Školenie','GraduationCap','#7b77c8',True),('Voľno','CalendarOff','#89939c',True),('Sviatok','CalendarDays','#bd945b',True),('Iné','CircleHelp','#8a8b91',True)]
     if not db.scalar(select(AttendanceType)):

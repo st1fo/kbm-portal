@@ -39,7 +39,7 @@ def allowed_pages(db, user) -> list[str]:
 def needed(method: str, path: str) -> set[str] | None:
     """Ktorá stránka musí byť viditeľná pre túto požiadavku (stačí jedna z množiny). None = vždy povolené."""
     if path.startswith('/api/journal/'): return {'journal'}
-    if path in ('/api/calendar', '/api/statistics'): return {'calendar', 'dashboard'}
+    if path in ('/api/calendar', '/api/statistics') or path.startswith('/api/hours'): return {'calendar', 'dashboard'}
     if path.startswith('/api/attendance'): return {'calendar'}
     if path.startswith('/api/requests') and method != 'GET': return {'requests'}
     return None

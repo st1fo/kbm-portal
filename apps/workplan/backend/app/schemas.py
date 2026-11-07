@@ -27,8 +27,12 @@ class Plan(BaseModel):
     end: str | None = Field(default=None,pattern=r'^([01]\d|2[0-3]):[0-5]\d$')
     note: str = Field(default='',max_length=2000)
     replace: bool = False
+    hours: float | None = Field(default=None,gt=0,le=24)
     @model_validator(mode='after')
     def valid(self):
+        if self.hours is not None:
+            if self.start_date != self.end_date: raise ValueError('Absencia na časť dňa musí byť v jednom dni.')
+            if abs(self.hours*4-round(self.hours*4))>1e-9: raise ValueError('Počet hodín zadajte po štvrťhodinách (napr. 1,5).')
         if self.end_date < self.start_date or (self.end_date-self.start_date).days > 366: raise ValueError('Neplatný rozsah dátumov (max. 367 dní).')
         if bool(self.start) != bool(self.end) or (self.start and self.end <= self.start): raise ValueError('Koniec musí byť po začiatku.')
         return self
