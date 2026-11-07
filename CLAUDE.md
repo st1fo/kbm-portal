@@ -61,6 +61,8 @@ Workplan admins can hide pages (Dochádzka/Denník/Prehľad/Žiadosti) per porta
 
 Workplan's Denník has kanban boards (`app/boards.py`, migration 0004 moved the old `todos` into a personal board „Moje úlohy“; frontend `journal/Board*.tsx` with `@dnd-kit`). A board without members is personal; members see and edit cards and columns, only the owner (or an admin) changes settings, members or deletes it. Cards are deliberately not linked to Denník tasks/time; „Zapísať ako aktivitu“ only prefills the activity form.
 
+Denník also has an AI day fill (`app/journal_ai.py`, `app/gemini.py`, frontend `journal/AiDayDialog.tsx`): free text → Gemini proposes activities/new tasks inside the day's unlogged worked time; the backend checks overlaps and pípnutia, and only `POST /api/journal/ai/apply` writes (one transaction). Tests replace `gemini.propose`.
+
 All three UIs share a light/dark theme: `localStorage['kbm-theme']` (`light`/`dark`/`auto`) → `data-theme` on `<html>`, applied before paint by a small non-inline script (CSP forbids inline) and switched from the top bar. Use the CSS tokens on `:root` in `apps/workplan/frontend/src/styles.css` instead of hex colours.
 
 Logbook domain logic sits in `apps/vehicle-logbook/backend/app/`:
@@ -74,4 +76,4 @@ Logbook domain logic sits in `apps/vehicle-logbook/backend/app/`:
 
 `EXCEL_ANALYSIS.md` documents how the original Excel formulas and VBA map onto the app.
 
-Config lives in `.env`: `PORT`, `BIND_ADDRESS`, `COOKIE_SECURE` (set it to 1 only behind HTTPS), `POSTGRES_PASSWORD`, `SSO_INTERNAL_KEY` (also used as Workplan's `JWT_SECRET`), `DEMO_PASSWORD`, and `GEMINI_API_KEY` / `GEMINI_MODEL`. Only `logbook-api` receives the Gemini variables. Backends run with `TZ=Europe/Bratislava`.
+Config lives in `.env`: `PORT`, `BIND_ADDRESS`, `COOKIE_SECURE` (set it to 1 only behind HTTPS), `POSTGRES_PASSWORD`, `SSO_INTERNAL_KEY` (also used as Workplan's `JWT_SECRET`), `DEMO_PASSWORD`, and `GEMINI_API_KEY` / `GEMINI_MODEL`. `logbook-api` and `workplan-api` receive the Gemini variables. Backends run with `TZ=Europe/Bratislava`.

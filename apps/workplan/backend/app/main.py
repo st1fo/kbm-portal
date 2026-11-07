@@ -16,6 +16,7 @@ from .common import TZ, today, row, audit, commit, owner, employee, days, month_
 from .journal import router as journal_router
 from .boards import router as boards_router
 from .pages import router as pages_router, allowed_pages
+from .journal_ai import router as ai_router
 from .purge import router as purge_router
 from .directory import visible_user_ids, group_names, restrict_to_group
 
@@ -23,6 +24,7 @@ app = FastAPI(title='KBM Workplan API',version='1.0.0')
 app.include_router(journal_router)
 app.include_router(boards_router)
 app.include_router(pages_router)
+app.include_router(ai_router)
 app.include_router(purge_router)
 login_attempts=defaultdict(deque)
 def notify_admins(db,message):

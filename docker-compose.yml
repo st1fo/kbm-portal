@@ -60,6 +60,9 @@ services:
       DATABASE_URL: postgresql+psycopg://workplan:${POSTGRES_PASSWORD}@workplan-db:5432/workplan
       JWT_SECRET: ${SSO_INTERNAL_KEY}
       TZ: Europe/Bratislava
+      # Gemini navrhuje aktivity v Denníku (AI doplnenie dňa); kľúč nejde do prehliadača.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-flash-lite}
     depends_on:
       workplan-db:
         condition: service_healthy
@@ -78,7 +81,7 @@ services:
       DATABASE_URL: postgresql+psycopg://logbook:${POSTGRES_PASSWORD}@logbook-db:5432/logbook
       COOKIE_SECURE: ${COOKIE_SECURE:-0}
       TZ: Europe/Bratislava
-      # Gemini is called only from this backend; the key never reaches the browser or other services.
+      # Gemini key: only logbook-api and workplan-api receive it; it never reaches the browser.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-flash-lite}
     depends_on:

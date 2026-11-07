@@ -1,8 +1,9 @@
-import { CalendarRange, FolderKanban, SquareKanban, Sun, Upload } from 'lucide-react';
+import { CalendarRange, FolderKanban, Sparkles, SquareKanban, Sun, Upload } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { User } from '../api';
 import { ActivityForm, ActivityLog } from './Activities';
+import { AiDayDialog } from './AiDayDialog';
 import type { Prefill } from './Activities';
 import { baNow } from './calc';
 import { CommandBar } from './CommandBar';
@@ -37,6 +38,7 @@ export function JournalPage({ me, users, isAdmin, notify }: { me: User; users: U
   const [prefill, setPrefill] = useState<Prefill | null>(null);
   const [openTask, setOpenTask] = useState<{ id: number; nonce: number } | null>(null);
   const [importing, setImporting] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
   const [tab, setTabState] = useState<Tab>(() => { try { const t = sessionStorage.getItem('kbm-journal-tab'); return TABS.some(x => x[0] === t) ? t as Tab : 'today'; } catch { return 'today'; } });
   const setTab = (t: Tab) => { setTabState(t); try { sessionStorage.setItem('kbm-journal-tab', t); } catch { /* bez úložiska */ } };
   useEffect(() => { setAttDate(null); setPrefill(null); }, [viewUid]);
@@ -62,6 +64,10 @@ export function JournalPage({ me, users, isAdmin, notify }: { me: User; users: U
     </nav>
     {tab === 'today' && <>
       <DayCard uid={uid} date={date} setDate={d => setAttDate(d)} state={state.data} onError={onError} />
+      <div className="j-ai-bar">
+        <button className="secondary" onClick={() => setAiOpen(true)}><Sparkles size={17} />Doplniť deň s AI</button>
+        <span>Napíš vlastnými slovami, čo si robil. AI rozdelí odpracovaný čas na aktivity a úlohy, ty to skontroluješ a zapíšeš.</span>
+      </div>
       <div className="j-dash">
         <div className="j-col"><ActivityForm uid={uid} defaultDate={state.data?.active_day ?? baNow().date} prefill={prefill} onError={onError} /></div>
         <div className="j-col"><ActivityLog uid={uid} onOpenTask={id => { setOpenTask({ id, nonce: Date.now() }); setTab('projects'); }} onError={onError} /></div>
@@ -77,6 +83,7 @@ export function JournalPage({ me, users, isAdmin, notify }: { me: User; users: U
       <span className="muted">Dáta Denníka sú uložené na serveri Workplanu. Pípnutia bez spojenia počkajú v prehliadači a odošlú sa neskôr.</span>
       <button className="secondary compact" onClick={() => setImporting(true)}><Upload size={15} />Importovať zo starého denníka</button>
     </div>}
+    {aiOpen && <AiDayDialog uid={uid} initialDate={date} onClose={() => setAiOpen(false)} onDone={m => { setAiOpen(false); notify(m); }} />}
     {importing && <ImportDialog onClose={() => setImporting(false)} onDone={m => { setImporting(false); notify(m); }} />}
   </div>;
 }

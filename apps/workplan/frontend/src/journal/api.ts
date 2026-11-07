@@ -90,6 +90,15 @@ export const journalApi = {
   addItem: (cid: number, text: string) => api<Card>(j(`/cards/${cid}/checklist`), 'POST', { text }),
   editItem: (id: number, data: Partial<{ text: string; done: boolean }>) => api<Card>(j('/checklist/' + id), 'PATCH', data),
   deleteItem: (id: number) => api<Card>(j('/checklist/' + id), 'DELETE'),
+  aiDay: (date: string, uid: number | null) => api<AiDay>(withUser(j('/ai/day?date=' + date), uid)),
+  aiPropose: (data: { date: string; message: string; history: { role: 'user' | 'model'; text: string }[]; draft: AiItem[] }, uid: number | null) =>
+    api<{ reply: string; items: AiChecked[]; day: AiDay }>(withUser(j('/ai/propose'), uid), 'POST', data),
+  aiCheck: (date: string, items: AiItem[], uid: number | null) => api<AiChecked[]>(withUser(j('/ai/check'), uid), 'POST', { date, items }),
+  aiApply: (date: string, items: AiItem[], uid: number | null) => api<{ created: number; new_tasks: string[] }>(withUser(j('/ai/apply'), uid), 'POST', { date, items }),
   importLegacy: (payload: unknown, dryRun: boolean) => api<ImportResult>(j('/import?dry_run=' + dryRun), 'POST', payload),
 };
+export type AiRange = { start: string; end: string; next_day: boolean; minutes: number };
+export type AiDay = { date: string; configured: boolean; worked: AiRange[]; worked_min: number; logged: (AiRange & { task: string; text: string })[]; logged_min: number; free: AiRange[]; free_min: number };
+export type AiItem = { start: string; end: string; task_id: number | null; new_task: string | null; project_id: number | null; customer: string | null; text: string };
+export type AiChecked = AiItem & { next_day: boolean; minutes: number; task: string; project: string; errors: string[]; warnings: string[] };
 export type ActivityInput = { task_id: number; date: string; start: string | null; end: string | null; text: string };

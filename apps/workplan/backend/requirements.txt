@@ -8,3 +8,4 @@ alembic==1.17.1
 psycopg[binary]==3.2.12
 openpyxl==3.1.5
 holidays==0.83
+google-genai==2.34.0
