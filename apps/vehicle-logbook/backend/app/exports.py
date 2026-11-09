@@ -399,8 +399,9 @@ def signature_rows(book, sheet, row, context, last_col):
     sheet.set_row(row, 28)
     sheet.write_string(row, 0, f"{place_phrase(context['place'])} dňa:", plain)
     sheet.merge_range(row, 2, row, 3, "", line)
-    sheet.write_datetime(row, 2, as_date(context["day"]), book.fmt(border=0, bottom=1, font_size=10, align="center",
-                                                                    num_format="d. m. yyyy"))
+    if context["day"]:   # bez dátumu ostane prázdna linka na ručné vypísanie
+        sheet.write_datetime(row, 2, as_date(context["day"]), book.fmt(border=0, bottom=1, font_size=10, align="center",
+                                                                        num_format="d. m. yyyy"))
     sheet.write_string(row, 4, "Vypracoval:", plain)
     sheet.merge_range(row, 5, row, last_col, context["author"], book.fmt(border=0, bottom=1, font_size=10, bold=True, align="center"))
     sheet.set_row(row + 1, 36)

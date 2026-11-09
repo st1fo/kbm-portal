@@ -132,6 +132,19 @@ class LogbookTests(unittest.TestCase):
                     self.assertEqual(workbook["Jazdy"]["C4"].value,"=1+1")
                     self.assertEqual(workbook["Jazdy"]["C4"].data_type,"s")
                     workbook.close()
+        # dátum pri podpise: zvolený, prázdny (vypíše sa ručne), neplatný
+        def signed_dates(value):
+            response = self.client.get(path+"/export",params={"year":2024,"month":1,"format":"xlsx","signed":value})
+            self.assertEqual(response.status_code,200)
+            workbook = load_workbook(io.BytesIO(response.content),read_only=True)
+            found = [cell.value.date() for sheet in workbook.worksheets for row in sheet.iter_rows() for cell in row
+                     if hasattr(cell.value,"date") and cell.value.year >= 2025]
+            workbook.close()
+            return found
+        self.assertIn(date(2025,2,3),signed_dates("2025-02-03"))
+        self.assertEqual(signed_dates(""),[])
+        self.assertEqual(self.client.get(path+"/export",params={"year":2024,"month":1,"format":"pdf","signed":"3.2.2025"}).status_code,422)
+        self.assertTrue(self.client.get(path+"/export",params={"year":2024,"month":1,"format":"pdf","signed":""}).content.startswith(b"%PDF"))
 
     def test_import_original_and_compare_excel(self):
         source = os.environ.get("ORIGINAL_XLSM")

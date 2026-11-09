@@ -374,7 +374,14 @@ def annual(reports):
 
 @app.get("/api/vehicles/{identifier}/export")
 def export(identifier: int,year: int=Query(ge=1900,le=9998),month: int | None=Query(None,ge=1,le=12),
-           format: str="xlsx",kind: str="report",db=Db,user=Member):
+           format: str="xlsx",kind: str="report",signed: str | None=None,db=Db,user=Member):
+    # dátum pri podpise: bez parametra dnešok, prázdny = voľná linka na ručné vypísanie
+    if signed is None: signed_day = today()
+    elif not signed.strip(): signed_day = None
+    else:
+        try: signed_day = date.fromisoformat(signed.strip())
+        except ValueError: fail("Dátum podpisu má formát RRRR-MM-DD.")
+        if not 1900 <= signed_day.year <= 9998: fail("Dátum podpisu má formát RRRR-MM-DD.")
     vehicle = vehicle_for(db,user,identifier)
     results = months(db,vehicle,year)
     selected = [results[month-1]] if month else results
@@ -383,7 +390,7 @@ def export(identifier: int,year: int=Query(ge=1900,le=9998),month: int | None=Qu
     purchases = [row for row in rows if row["type"] == "fuel"]
     context = dict(vehicle=vehicle, year=year, month=month, months=selected, trips=trips, fuels=purchases,
                    report=selected[0] if month else annual(selected), author=getattr(user, "display_name", user.username),
-                   day=today(), place=distances.HOME)
+                   day=signed_day, place=distances.HOME)
     period = f"{year}-{month:02}" if month else str(year)
     if format == "pdf" and kind == "report":
         data, mime = exports.pdf(context),"application/pdf"

@@ -177,6 +177,7 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
   const [search,setSearch]=useState('');
   const [descending,setDescending]=useState(true);
   const [annual,setAnnual]=useState(false);
+  const [signed,setSigned]=useState(()=>localDay());   // dátum pri podpise vo výkaze; prázdny = ručne
   const [demoBusy,setDemoBusy]=useState(false);
   const vehicle=vehicles.find(v=>v.id===vehicleId);
   const report=history[month-1];
@@ -264,7 +265,7 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
     } catch(error){setProblem(errorText(error));} finally{setDemoBusy(false);}
   }
   function exportLink(format:string,kind='report',wholeYear=false) {
-    return '/vehicle-logbook/api'+path+'/export?year='+year+(wholeYear?'':'&month='+month)+'&format='+format+'&kind='+kind;
+    return '/vehicle-logbook/api'+path+'/export?year='+year+(wholeYear?'':'&month='+month)+'&format='+format+'&kind='+kind+(kind==='report'?'&signed='+signed:'');
   }
   function newVehicle() {
     setEdit({title:'Nové vozidlo',path:'/vehicles',fields:vehicleFields,
@@ -403,7 +404,9 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
 
   const reports=<>
     <PageTitle title="Výkazy">
-      {ready&&<><Button variant="outlined" startIcon={<Icon name="download"/>} href={exportLink('pdf','report',annual)}>PDF</Button>
+      {ready&&<><TextField type="date" size="small" label="Dátum podpisu" value={signed} onChange={event=>setSigned(event.target.value)}
+          slotProps={{inputLabel:{shrink:true}}} className="sign-date" sx={{width:{xs:'100%',sm:170}}} title="Dátum pri „V Žiline dňa“. Vymažte ho, ak ho chcete dopísať ručne."/>
+        <Button variant="outlined" startIcon={<Icon name="download"/>} href={exportLink('pdf','report',annual)}>PDF</Button>
         <Button variant="contained" startIcon={<Icon name="download"/>} href={exportLink('xlsx','report',annual)}>Excel</Button></>}
     </PageTitle>
     {gate}{ready&&<>

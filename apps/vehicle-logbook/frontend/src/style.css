@@ -223,6 +223,7 @@ details > summary { cursor: pointer; }
   .toolbar-sum { flex-basis: 100%; margin-left: 0; }
   .page-title .actions { width: 100%; }
   .page-title .actions > * { flex: 1; }
+  .page-title .actions > .sign-date { flex: 1 1 100%; }
   .form-grid { grid-template-columns: minmax(0,1fr); }
   .metric-list { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
   .metric-list dd { font-size: 1.05rem; }
