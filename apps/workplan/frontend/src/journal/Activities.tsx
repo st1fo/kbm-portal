@@ -1,3 +1,4 @@
+import { TimeInput } from '../components/TimeInput';
 import { Pencil, Plus, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
@@ -115,8 +116,8 @@ export function ActivityForm({ uid, defaultDate, prefill, onError }: { uid: numb
         <span className="j-lbl">Kedy</span>
         <div className="j-time-row">
           <input type="date" value={date} aria-label="Dátum aktivity" onChange={e => setDate(e.target.value)} />
-          <label className="j-t"><span>od</span><input type="time" value={from} onChange={e => setFrom(e.target.value)} onKeyDown={e => e.key === 'Enter' && void save()} /></label>
-          <label className="j-t"><span>do</span><input type="time" value={to} onChange={e => setTo(e.target.value)} onKeyDown={e => e.key === 'Enter' && void save()} /></label>
+          <label className="j-t"><span>od</span><TimeInput value={from} aria-label="Čas od" onChange={setFrom} onKeyDown={e => e.key === 'Enter' && void save()} /></label>
+          <label className="j-t"><span>do</span><TimeInput value={to} aria-label="Čas do" onChange={setTo} onKeyDown={e => e.key === 'Enter' && void save()} /></label>
         </div>
         <div className="j-span"><SpanText date={date || defaultDate} from={from} to={to} /></div>
       </div>
@@ -166,8 +167,8 @@ export function ActivityEditor({ a, tasks, projects, onDone, onError }: { a: Act
     </select>
     <div className="j-time-row">
       <input type="date" aria-label="Dátum" value={date} onChange={e => setDate(e.target.value)} onKeyDown={e => keys(e)} />
-      <label className="j-t"><span>od</span><input type="time" aria-label="Čas od" value={from} onChange={e => setFrom(e.target.value)} onKeyDown={e => keys(e)} /></label>
-      <label className="j-t"><span>do</span><input type="time" aria-label="Čas do" value={to} onChange={e => setTo(e.target.value)} onKeyDown={e => keys(e)} /></label>
+      <label className="j-t"><span>od</span><TimeInput aria-label="Čas od" value={from} onChange={setFrom} onKeyDown={e => keys(e)} /></label>
+      <label className="j-t"><span>do</span><TimeInput aria-label="Čas do" value={to} onChange={setTo} onKeyDown={e => keys(e)} /></label>
     </div>
     <div className={'j-span' + (err ? ' warn' : '')}>{err || (from && to ? <SpanText date={date} from={from} to={to} /> : 'Bez času „do“ — trvanie sa nepočíta.')}</div>
     <textarea ref={ta} aria-label="Text aktivity" value={text} maxLength={5000} rows={Math.min(8, Math.max(3, text.split('\n').length + 1))} onChange={e => setText(e.target.value)} onKeyDown={e => keys(e, true)} />

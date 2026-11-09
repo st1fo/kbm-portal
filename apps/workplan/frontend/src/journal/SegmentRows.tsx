@@ -1,3 +1,4 @@
+import { TimeInput } from '../components/TimeInput';
 import { X } from 'lucide-react';
 import { useRef } from 'react';
 import { fmtDur, unwrap } from './calc';
@@ -32,8 +33,8 @@ export function SegmentRows({ rows, onChange, onCommit, liveMin, emptyText, onEs
           <span className="j-seg-no">Úsek {i + 1}</span>
           {(['in', 'out'] as const).map(f => <label key={f} className="j-seg-time">
             <small>{f === 'in' ? 'Príchod' : 'Odchod'}{u[i][f] != null && u[i][f]! >= 1440 && <em className="j-nd">+1 deň</em>}</small>
-            <input type="time" value={r[f]} aria-label={`Úsek ${i + 1} ${f === 'in' ? 'príchod' : 'odchod'}`}
-              onChange={e => set(i, f, e.target.value)}
+            <TimeInput value={r[f]} aria-label={`Úsek ${i + 1} ${f === 'in' ? 'príchod' : 'odchod'}`}
+              onChange={v => set(i, f, v)}
               onKeyDown={e => {
                 if (e.key === 'Enter') { e.preventDefault(); dirty.current = false; onCommit(rows); }
                 else if (e.key === 'Escape' && onEscape) { dirty.current = false; onEscape(); }

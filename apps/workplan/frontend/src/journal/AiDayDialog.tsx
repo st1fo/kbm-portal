@@ -1,3 +1,4 @@
+import { TimeInput } from '../components/TimeInput';
 import { AlertTriangle, Loader2, Plus, Send, Sparkles, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -103,9 +104,9 @@ export function AiDayDialog({ uid, initialDate, onClose, onDone }: { uid: number
         {rows.map(r => <div key={r.key} className={'ai-row' + (r.errors?.length ? ' bad' : '')}>
           <div className="ai-row-main">
             <div className="ai-time">
-              <input type="time" value={r.start} aria-label="Od" onChange={e => set(r.key, { start: e.target.value })} />
+              <TimeInput value={r.start} aria-label="Od" onChange={v => set(r.key, { start: v })} />
               <span>–</span>
-              <input type="time" value={r.end} aria-label="Do" onChange={e => set(r.key, { end: e.target.value })} />
+              <TimeInput value={r.end} aria-label="Do" onChange={v => set(r.key, { end: v })} />
               {r.minutes != null && <small>{fmtDur(r.minutes)}{r.next_day ? ' · do rána' : ''}</small>}
             </div>
             <div className="ai-task">
