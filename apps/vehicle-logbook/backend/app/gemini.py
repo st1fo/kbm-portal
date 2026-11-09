@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 # Cheapest stable multimodal model available to new Gemini API projects (11/2026).
 DEFAULT_MODEL = "gemini-3.6-flash"
-TIMEOUT_MS = 45_000
+TIMEOUT_MS = 60_000
 
 
 class AssistantError(RuntimeError):
@@ -85,6 +85,7 @@ class ChatResult(BaseModel):
         description="Celý zoznam cieľov, iba ak používateľ opisuje, kde počas mesiaca jazdil")
     operations: list[OperationWire] = Field(default_factory=list)
     create_plan: bool = Field(False, description="Používateľ žiada vytvoriť alebo prepočítať harmonogram")
+    routes_invented: bool = Field(False, description="true, ak ciele alebo ich počty v routes si navrhol sám (používateľ ich neuviedol)")
 
 
 RECEIPT_PROMPT = """Si nástroj na prepis pokladničných dokladov z čerpacích staníc pre knihu jázd.
@@ -141,6 +142,8 @@ Pravidlá:
   na Slovensku primerané východisku. count a approximate_km (tam a späť) zvoľ tak, aby súčet count × approximate_km
   bol približne km_na_navrh (v_knihe); rozumné sú 4 – 12 cieľov. Ak km_na_navrh nie je známe (chýba koniec
   tachometra), routes nevracaj a opýtaj sa na koncový stav. V reply vymenuj navrhnuté ciele a dodaj, že ide o odhad.
+  Vtedy nastav routes_invented=true; ak ciele a počty uviedol používateľ, routes_invented=false. approximate_km ber
+  z historia_cielov (km_priemer), nie z katalógu.
 - Kilometre v reply preberaj iba z DATA (km_na_navrh, tachometer); sám ich neprepočítavaj.
 - Ukladanie do evidencie a schválenie výkazu robí iba používateľ tlačidlom. Ty nič neukladáš ani neschvaľuješ.
 - V reply nikdy netvrď, že si harmonogram vytvoril, doplnil, prepočítal alebo že si niečo uložil či pridal do
@@ -202,7 +205,8 @@ def _generate(contents, schema, system):
             raise
         except Exception as error:  # SDK, network and quota errors all end in a readable message
             code = getattr(error, "code", None) or getattr(error, "status_code", None)
-            if code in (429, 500, 503, 504) and index + 1 < len(models):
+            slow = "timeout" in type(error).__name__.lower() or "timed out" in str(error).lower()
+            if (code in (429, 500, 503, 504) or slow) and index + 1 < len(models):
                 continue  # overloaded: one more try with the lighter model
             raise AssistantError(_describe(error)) from error
     text = getattr(response, "text", None)

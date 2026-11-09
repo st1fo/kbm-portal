@@ -193,12 +193,32 @@ def catalogue(db, vehicle):
     return list(db.scalars(select(Destination).where(Destination.vehicle_id == vehicle.id).order_by(Destination.name)))
 
 
+def history_km(db, vehicle, destination, origin=None):
+    """Average length of this vehicle's recorded trips to the destination from the same origin (trips without an
+    origin count too); manual trips are preferred over earlier estimates."""
+    name = planner.normalized(destination or "")
+    start = planner.normalized(origin or distances.HOME)
+    if not name:
+        return None
+    rows = db.execute(select(Trip.destination, Trip.origin, Trip.end_odo - Trip.start_odo, Trip.draft_id).where(
+        Trip.vehicle_id == vehicle.id, Trip.destination != "").order_by(Trip.day.desc()).limit(500)).all()
+    same = [(length, draft) for dest, place, length, draft in rows if planner.normalized(dest) == name and length > 0
+            and (not place or planner.normalized(place) == start)]
+    manual = [length for length, draft in same if not draft] or [length for length, _ in same]
+    return round(sum(manual) / len(manual)) if manual else None
+
+
 def known_km(db, vehicle, state, destination, origin=None):
-    """Round-trip km: vehicle catalogue for this origin, then the Žilina table, then the draft's routes."""
+    """Round-trip km: what this vehicle really drove there (logbook history), then its catalogue for this origin
+    (implausibly short entries are skipped), then the Žilina table, then the draft's routes."""
     origin = origin or state.get("origin") or distances.HOME
     name = planner.normalized(destination or "")
+    recorded = history_km(db, vehicle, destination, origin)
+    if recorded:
+        return recorded
     matches = [item for item in catalogue(db, vehicle) if planner.normalized(item.name) == name
-               and (not item.origin or planner.normalized(item.origin) == planner.normalized(origin))]
+               and (not item.origin or planner.normalized(item.origin) == planner.normalized(origin))
+               and (item.distance * 2 >= 20 or distances.is_city(destination))]
     if matches:
         return matches[0].distance * 2
     builtin = distances.round_trip(destination, origin)
@@ -1381,6 +1401,9 @@ def message(session_id: str, data: MessageIn, db=Db, user=Member):
             if routes:
                 state["routes"] = routes
                 changed.append("routes")
+                if result.routes_invented and fit_counts(db, vehicle, session, state):
+                    answer.append("Počty jázd som prispôsobil najazdeným kilometrom: " + ", ".join(
+                        f"{r['destination']} {r['count']}×" for r in state["routes"]) + ".")
         for proposal in result.operations[:20]:
             try:
                 changed += apply_operation(db, vehicle, session, state, wire_operation(proposal))
@@ -1392,6 +1415,7 @@ def message(session_id: str, data: MessageIn, db=Db, user=Member):
             state["trips"] = []  # the user explicitly asked for a new plan (new or the same description)
         if result.create_plan and not state["routes"] and not state["trips"]:
             state["routes"] = routes_from_history(db, vehicle, session, state)
+            fit_counts(db, vehicle, session, state)
             if state["routes"]:
                 changed.append("routes")
                 answer = [a for a in answer if a != (result.reply or "").strip()]  # its text named destinations it did not return
@@ -1494,6 +1518,37 @@ def destination_history(db, vehicle, month):
                       .where(Trip.vehicle_id == vehicle.id, Trip.day >= since, Trip.day < month, Trip.destination != "")
                       .group_by(Trip.destination, Trip.origin, Trip.category).order_by(func.count().desc()).limit(15)).all()
     return [dict(ciel=d, odkial=o, typ=c, pocet_jazd=n, km_priemer=round(float(k or 0))) for d, o, c, n, k in rows]
+
+
+def fit_counts(db, vehicle, session, state):
+    """For destinations the assistant proposed itself: change how many times each is driven so that the sum of their
+    usual lengths is close to the kilometres left to plan. Returns True when counts changed."""
+    left = book_context(db, vehicle, session, state)["km_na_navrh"]
+    routes = [r for r in state["routes"] if r.get("approximate_km")]
+    if not left or left <= 0 or not routes:
+        return False
+    before = [r["count"] for r in routes]
+    total = lambda: sum(r["count"] * r["approximate_km"] for r in routes)
+    for _ in range(60):
+        gap = total() - left
+        if abs(gap) <= left * 0.12:
+            break
+        if gap > 0:  # too many kilometres: drop the occurrence that brings the sum closest
+            options = [r for r in routes if r["count"] > 1] or ([r for r in routes] if len([r for r in routes if r["count"]]) > 1 else [])
+            options = [r for r in options if r["count"] > 0]
+            if not options:
+                break
+            pick = min(options, key=lambda r: abs(gap - r["approximate_km"]))
+            if abs(gap - pick["approximate_km"]) >= abs(gap):
+                break
+            pick["count"] -= 1
+        else:
+            pick = min(routes, key=lambda r: abs(gap + r["approximate_km"]))
+            if abs(gap + pick["approximate_km"]) >= abs(gap) or sum(r["count"] for r in routes) >= 40:
+                break
+            pick["count"] += 1
+    state["routes"] = [r for r in state["routes"] if r["count"] > 0]
+    return before != [r["count"] for r in routes]
 
 
 def routes_from_history(db, vehicle, session, state):

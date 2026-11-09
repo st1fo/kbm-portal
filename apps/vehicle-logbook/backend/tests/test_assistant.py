@@ -491,6 +491,19 @@ class AssistantFlowTests(unittest.TestCase):
         self.assertEqual(sum(t["distance"] for t in draft["trips"]), 6200 - 5480)
         self.assertEqual(draft["problems"], [])
 
+        # The model invents too many trips and the catalogue has a broken distance: recorded trips win, counts are fitted.
+        from app.db import Destination
+        with Session() as db:
+            db.add(Destination(vehicle_id=vehicle["id"], name="Košice", origin="", distance=1, note=""))
+            db.commit()
+        draft = self.chat(sid, "Navrhni znova.", "Navrhujem Košice 4× a Martin 3×.", create_plan=True, routes_invented=True,
+                          routes=[{"destination": "Košice", "count": 4, "approximate_km": 280, "category": "mimo mesto", "days": []},
+                                  {"destination": "Martin", "count": 3, "approximate_km": 100, "category": "mimo mesto", "days": []}])
+        self.assertEqual({r["destination"]: r["approximate_km"] for r in draft["routes"]}, {"Košice": 280, "Martin": 100})
+        self.assertLessEqual(abs(sum(r["count"] * r["approximate_km"] for r in draft["routes"]) - 720), 720 * 0.12 + 1)
+        self.assertIn("Počty jázd som prispôsobil", draft["messages"][-1]["text"])
+        self.assertFalse([t for t in draft["trips"] if t["warning"]], draft["trips"])
+
     def test_trips_are_planned_around_refuels(self):
         """Refuels without an odometer (FleetCor) still steer the schedule: the tank never goes below zero before a
         refuel and every refuel fits; when the fuel cannot cover the month, only the end is short and it is explained."""
