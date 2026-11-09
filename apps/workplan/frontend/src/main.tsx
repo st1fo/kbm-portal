@@ -4,7 +4,7 @@ import {createRoot} from 'react-dom/client';
 import {QueryClient,QueryClientProvider,useQuery,useQueryClient} from '@tanstack/react-query';
 import {Building2,House,Palmtree,HeartPulse,Stethoscope,Plane,GraduationCap,CalendarOff,CalendarDays,CircleHelp,ChevronLeft,ChevronRight,Plus,Search,Download,Bell,Settings,LogOut,Clock,LayoutDashboard,Check,Users,CheckCircle2,ChevronDown,Trash2,ClipboardList,ArrowRight,Loader2,Menu,NotebookPen,LayoutGrid,Sun,Moon,Monitor} from 'lucide-react';
 import type {LucideIcon} from 'lucide-react';
-import {api,getToken,localDay,dateLabel,hrs} from './api';
+import {api,downloadFile,getToken,localDay,dateLabel,hrs} from './api';
 import type {User,Kind,Entry,Leave} from './api';
 import {Dialog} from './components/ui/dialog';
 import {JournalPage} from './journal/JournalPage';
@@ -48,7 +48,7 @@ const setTeam=(t:string)=>{setTeamState(t);try{localStorage.setItem('kbm-workpla
  function open(m:any){setError('');setModal(m)}
  function shift(n:number){const d=new Date(month+'-01T12:00:00');d.setMonth(d.getMonth()+n);setMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)}
  function openCell(uid:number,d:string){const e=entries.find(x=>x.user_id===uid&&x.date===d);const r=pending.find(x=>x.user_id===uid&&x.start_date<=d&&x.end_date>=d);open({type:'attendance',user_id:uid,start_date:d,end_date:d,type_id:e?.type_id||types[0]?.id,start:e?.start||'',end:e?.end||'',note:e?.note||'',replace:!!e,entry:e,request:r})}
- async function exportReport(format:string,data?:any){setBusy(true);setError('');try{const p=new URLSearchParams({start:data?.start||month+'-01',end:data?.end||`${month}-${new Date(Number(month.slice(0,4)),Number(month.slice(5)),0).getDate()}`,format});if(data?.user_id)p.set('user_id',data.user_id);if(data?.group)p.set('group',data.group);const r=await fetch('/workplan/api/reports?'+p);if(!r.ok)throw new Error('Export sa nepodaril. Skontrolujte rozsah a prihlásenie.');const url=URL.createObjectURL(await r.blob());const a=document.createElement('a');a.href=url;a.download=`KBM-dochadzka-${month}.${format}`;a.click();URL.revokeObjectURL(url);setToast('Report bol stiahnutý.')}catch(e){setError((e as Error).message)}finally{setBusy(false)}}
+ async function exportReport(format:string,data?:any){setBusy(true);setError('');try{const p=new URLSearchParams({start:data?.start||month+'-01',end:data?.end||`${month}-${new Date(Number(month.slice(0,4)),Number(month.slice(5)),0).getDate()}`,format});if(data?.user_id)p.set('user_id',data.user_id);if(data?.group)p.set('group',data.group);await downloadFile('/workplan/api/reports?'+p,`KBM-dochadzka-${month}.${format}`,'Export sa nepodaril. Skontrolujte rozsah a prihlásenie.');setToast('Report bol stiahnutý.')}catch(e){setError((e as Error).message)}finally{setBusy(false)}}
  if(!token){window.location.assign('/?next=workplan');return <div className="loading">Presmerovanie na portál…</div>;}
  if(me.isPending)return <div className="loading"><Loader2 className="spin"/> Načítavam váš pracovný priestor…</div>;
  if(me.isError)return <div className="loading">{me.error.message}<button onClick={()=>{window.location.assign('/?next=workplan')}}>Späť na prihlásenie</button></div>;

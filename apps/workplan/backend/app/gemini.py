@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 log = logging.getLogger('workplan.gemini')
 DEFAULT_MODEL = 'gemini-3.6-flash'
-TIMEOUT_MS = 45_000
+TIMEOUT_MS = 60_000   # na jeden pokus; brána čaká 150 s, stačí na hlavný aj záložný model
 
 
 class AIError(RuntimeError):
@@ -69,8 +69,14 @@ client_factory = _client   # testy ho nahradia
 
 
 def fallback_model() -> str:
-    """Ľahší model na druhý pokus, keď je hlavný preťažený (503/429)."""
+    """Ľahší model na druhý pokus, keď je hlavný preťažený alebo príliš pomalý."""
     return os.getenv('GEMINI_FALLBACK_MODEL', '').strip() or 'gemini-3.1-flash-lite'
+
+
+def overloaded(error) -> bool:
+    """Limit požiadaviek, chyba servera alebo vypršaný čas: oplatí sa skúsiť záložný model."""
+    code = getattr(error, 'code', None) or getattr(error, 'status_code', None)
+    return code in (429, 500, 503, 504) or 'timeout' in type(error).__name__.lower() or 'timed out' in str(error).lower()
 
 
 def _config(model: str):
@@ -111,9 +117,12 @@ def propose(context: dict, history: list[dict], message: str) -> Proposal:
         except Exception as error:
             log.warning('Gemini zlyhalo (pokus %s): %r', attempt, error)
             last = AIError(_describe(error))
+            if overloaded(error):
+                model = fallback_model()
+                continue
             code = getattr(error, 'code', None) or getattr(error, 'status_code', None)
-            if code and 400 <= int(code) < 500 and int(code) != 429: break
-            if code and int(code) in (429, 500, 503, 504): model = fallback_model()  # preťažený model → ľahší
+            if code and 400 <= int(code) < 500:
+                break   # neplatný kľúč alebo požiadavka: opakovanie nepomôže
             continue
         if not getattr(r, 'text', None):
             log.warning('Gemini vrátil prázdnu odpoveď (pokus %s)', attempt)

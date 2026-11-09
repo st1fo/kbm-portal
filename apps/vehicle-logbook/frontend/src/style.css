@@ -3,13 +3,13 @@
   --surface:#fff; --head:#f6f8f6; --hover:#f7faf8; --green-soft:#e8efe9; --track:#edf0ee; --seg:#e9ece9; --bar:#9cc0ad; --icon-muted:#9fb0a6;
   --warn-bg:#fff4d6; --warn-ink:#6b4e00; --fuel-ink:#8a6400; --weekend:#9a6b00; --warn:#b26a00; --accent-bg:#fffbed; --accent-line:#f0dfa6;
   --blue-line:#dce6f0; --blue-bg:#f8fafd; --blue-ink:#526780; --err-bg:#fdecea; --err-line:#f5c2bd; --err-ink:#7a1c14;
-  --tag-bg:#fff3bf; --tag-ink:#5c4400; --flash:#ffe8a3; --ok-line:#b7d7c0; --tank-bg:#f1f6f3; --plus:#1b7a3d; --minus:#9a3d00; --glow:#326c5620; }
+  --tag-bg:#fff3bf; --tag-ink:#5c4400; --flash:#ffe8a3; --ok-line:#b7d7c0; --tank-bg:#f1f6f3; --plus:#1b7a3d; --glow:#326c5620; }
 /* tmavý vzhľad: data-theme na <html> nastavuje theme-init.js a theme.ts */
 :root[data-theme=dark] { color-scheme: dark; --ink:#e6ece8; --muted:#9aa69f; --line:#333b37; --soft:#161a19; --green:#6cc19e; --on-green:#10241b;
   --surface:#202523; --head:#1d2220; --hover:#262c29; --green-soft:#1f3a30; --track:#343c38; --seg:#2a302d; --bar:#4f7d66; --icon-muted:#6f7d75;
   --warn-bg:#3a3020; --warn-ink:#ecc979; --fuel-ink:#e3b860; --weekend:#e0b45a; --warn:#f0a94a; --accent-bg:#29271d; --accent-line:#5a5027;
   --blue-line:#2c3a4a; --blue-bg:#1c2430; --blue-ink:#9fb4cc; --err-bg:#42242a; --err-line:#5c2f36; --err-ink:#f4b0a8;
-  --tag-bg:#3b3520; --tag-ink:#ead68a; --flash:#4a3f1a; --ok-line:#2f5a45; --tank-bg:#1d2622; --plus:#6fd394; --minus:#f0a070; --glow:#00000055; }
+  --tag-bg:#3b3520; --tag-ink:#ead68a; --flash:#4a3f1a; --ok-line:#2f5a45; --tank-bg:#1d2622; --plus:#6fd394; --glow:#00000055; }
 body { margin: 0; background: var(--soft); color: var(--ink); }
 .icon { flex-shrink: 0; vertical-align: -3px; }
 .muted { color: var(--muted); }
@@ -232,8 +232,6 @@ details > summary { cursor: pointer; }
 
 /* mesačný sprievodca */
 .summary-strip { display: flex; justify-content: space-between; gap: 8px; align-items: center; flex-wrap: wrap; }
-.planner-route { border: 1px solid var(--blue-line); border-radius: 12px; padding: 14px; background: var(--blue-bg); }
-.planner-table { min-width: 800px; }
 /* Monthly assistant wizard: live month preview on the left, chat on the right */
 .wizard { display: flex; flex-direction: column; gap: 12px; }
 .wizard-split { display: grid; grid-template-columns: minmax(0,1fr) minmax(320px,380px); gap: 16px; align-items: start; }
@@ -253,37 +251,21 @@ details > summary { cursor: pointer; }
 .chat-form { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-top: 1px solid var(--line); }
 .chat-form small { font-size: .72rem; line-height: 1.35; }
 .odo-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin-top: 14px; align-items: start; }
-.odo-sum { display: flex; flex-direction: column; gap: 4px; padding: 4px 6px; }
-.odo-sum span { font-size: .8rem; color: var(--blue-ink); }
-.odo-sum strong { font-size: 1.3rem; }
 .routes { margin-top: 10px; }
-.draft-table { margin-top: 10px; }
-.draft-table table { min-width: 700px; }
-.draft-table th, .draft-table td { padding-left: 6px; padding-right: 6px; }
-.draft-table td { vertical-align: top; padding-top: 8px; padding-bottom: 8px; }
-.draft-row { transition: background-color .4s; }
-.draft-row.changed { box-shadow: inset 4px 0 0 #f59f00; animation: row-flash 2.6s ease-out; }
-.draft-row.book-row td { color: var(--mui-palette-text-secondary, inherit); background: color-mix(in srgb, currentColor 4%, transparent); }
 .changed-field { animation: row-flash 2.6s ease-out; border-radius: 8px; }
 @keyframes row-flash { from { background-color: var(--flash); } to { background-color: transparent; } }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); display: block; }
 .receipt-image { max-width: 100%; display: block; margin-inline: auto; }
 .receipt-frame { width: 100%; height: 70vh; border: 0; }
 .block { display: block; }
 .nowrap { white-space: nowrap; }
 .warn { color: var(--warn); cursor: help; }
 .tight { margin: 0; padding-left: 18px; }
-.legend { display: inline-flex; gap: 4px; align-items: center; margin-left: 8px; flex-wrap: wrap; }
 .approve-panel { border-color: var(--ok-line) !important; }
 @media (max-width: 900px) {
   .wizard-chat { position: static; height: calc(100dvh - 190px); min-height: 420px; }
   .odo-grid { grid-template-columns: minmax(0,1fr); }
 }
-.tank-strip { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; margin-top: 12px; padding: 9px 12px;
-  border-radius: 10px; background: var(--tank-bg); border: 1px solid var(--line); font-size: .85rem; }
-.tank-strip .plus b { color: var(--plus); }
-.tank-strip .minus b { color: var(--minus); }
 /* faktúra z tankovacích kariet */
 .invoice-preview { margin-top: 16px; display: flex; flex-direction: column; gap: 12px; }
 .invoice-preview h3 { margin: 0; font-size: 1.05rem; }

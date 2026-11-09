@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { InputHTMLAttributes, KeyboardEvent } from 'react';
+import { hmToMin, minToHm, two } from '../journal/calc';
 
 /**
  * 24-hodinový čas bez AM/PM. Píše sa voľne: „8“, „830“, „8:30“, „8.30“, „17,15“ → 08:00, 08:30, 17:15.
@@ -19,12 +20,12 @@ export function parseTime(text: string): string | null {
   } else return null;
   if (h === 24 && m === 0) h = 0;
   if (h > 23 || m > 59) return null;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  return `${two(h)}:${two(m)}`;
 }
 
-const SLOTS = Array.from({ length: 96 }, (_, i) => `${String(Math.floor(i / 4)).padStart(2, '0')}:${String(i % 4 * 15).padStart(2, '0')}`);
-const toMin = (v: string) => +v.slice(0, 2) * 60 + +v.slice(3);
-const fromMin = (m: number) => { const x = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`; };
+const SLOTS = Array.from({ length: 96 }, (_, i) => minToHm(i * 15));
+const toMin = (v: string) => hmToMin(v)!;
+const fromMin = (m: number) => minToHm(((m % 1440) + 1440) % 1440);  // wraps around midnight
 const nowHm = () => { const d = new Date(); return fromMin(d.getHours() * 60 + d.getMinutes()); };
 
 type Props = Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'> & { value: string; onChange: (v: string) => void };
@@ -35,8 +36,8 @@ export function TimeInput({ value, onChange, onKeyDown, onBlur, onFocus, classNa
   const [bad, setBad] = useState(false);
   const [pos, setPos] = useState<{ left: number; top: number; up: boolean; host: HTMLElement | null } | null>(null);
   const focused = useRef(false);
-  const before = useRef(value);
-  const justFocused = useRef(false);   // klik do poľa označí celý čas, aby sa dal hneď prepísať   // hodnota pred písaním: neplatný vstup sa vráti na ňu
+  const before = useRef(value);         // hodnota pred písaním: neplatný vstup sa vráti na ňu
+  const justFocused = useRef(false);   // klik do poľa označí celý čas, aby sa dal hneď prepísať
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
   useEffect(() => { if (!focused.current) { setDraft(value); setBad(false); } }, [value]);
@@ -104,7 +105,8 @@ export function TimeInput({ value, onChange, onKeyDown, onBlur, onFocus, classNa
       onFocus={e => { focused.current = true; justFocused.current = true; before.current = value; e.currentTarget.select(); onFocus?.(e); }}
       onMouseUp={e => { if (justFocused.current) { e.preventDefault(); justFocused.current = false; } }}
       onClick={() => { justFocused.current = false; if (open) setOpen(false); else show(); }}
-      onBlur={e => { focused.current = false; window.setTimeout(() => setOpen(false)); commit(); onBlur?.(e); }}  // zatvoriť až po presune fokusu (Radix inak vráti fokus na dialóg)
+      // zoznam zatvoriť až po presune fokusu, inak Radix vráti fokus na dialóg
+      onBlur={e => { focused.current = false; window.setTimeout(() => setOpen(false)); commit(); onBlur?.(e); }}
       onKeyDown={keys} />
     {open && pos && createPortal(<div ref={list} className={'time-list' + (pos.up ? ' up' : '')} role="listbox" aria-label="Vyber čas"
       style={{ left: pos.left, top: pos.top, position: pos.host ? 'absolute' : 'fixed' }} onMouseDown={e => e.preventDefault()}>

@@ -114,7 +114,7 @@ class AssistantFlowTests(unittest.TestCase):
         self.ok(self.admin.post(f"/api/assistant/{sid}/files", files={"file": ("again.png", PNG)}), 409)
         self.ok(self.admin.post(f"/api/assistant/{sid}/files", files={"file": ("x.txt", b"hello")}), 422)
         self.assertEqual([f["status"] for f in draft["files"]], ["pending"] * 3)
-        self.assertFalse(draft["can_confirm"])
+        self.assertTrue(draft["receipt_problems"])  # unprocessed uploads block approval
 
         # Gemini extracts receipts: one is complete, one has an unreadable total, one duplicates the logbook.
         FAKE.queue["ReceiptExtraction"] += [
@@ -129,9 +129,8 @@ class AssistantFlowTests(unittest.TestCase):
         self.assertEqual(receipts["B2"]["unreadable"], ["gross"])
         self.assertIsNone(receipts["B2"]["odo"])
         self.assertIn("evidencii", receipts["B3"]["duplicate"])
-        self.assertFalse(draft["can_confirm"])
+        self.assertEqual(len(draft["receipt_problems"]), 2)
         self.assertEqual(set(draft["highlight"]), {"B1", "B2", "B3"})
-        self.ok(self.admin.post(f"/api/assistant/{sid}/confirm-receipts"), 422)
         # without a description of the month there is nothing to plan yet; the assistant asks for it
         planned = self.ok(self.admin.post(f"/api/assistant/{sid}/plan", json={}))
         self.assertEqual(planned["trips"], [])
@@ -141,7 +140,7 @@ class AssistantFlowTests(unittest.TestCase):
         draft = self.ok(self.admin.post(f"/api/assistant/{sid}/operations", json={"operations": [
             {"action": "update_receipt", "row": "B2", "gross": "64.40"},
             {"action": "delete_receipt", "row": "B3"}]}))
-        self.assertTrue(draft["can_confirm"])
+        self.assertEqual(draft["receipt_problems"], [])
         self.assertEqual(len(draft["files"]), 2)
 
         # The user describes the month: the schedule for the whole month is created right away (no confirm step).
@@ -159,8 +158,6 @@ class AssistantFlowTests(unittest.TestCase):
         sent = FAKE.calls[-1][2][-1].parts[0].text
         self.assertTrue(sent.startswith("DATA"))
 
-        draft = self.ok(self.admin.post(f"/api/assistant/{sid}/confirm-receipts"))
-        self.assertTrue(draft["receipts_confirmed"] and draft["can_plan"])
         draft = self.ok(self.admin.post(f"/api/assistant/{sid}/plan", json={"rebuild": True}))
         self.assert_schedule(draft)
         self.assertEqual(len(draft["trips"]), 5)
@@ -190,12 +187,10 @@ class AssistantFlowTests(unittest.TestCase):
         draft = self.chat(sid, "To druhé tankovanie bolo 42 litrov",
                           operations=[{"action": "update_receipt", "row": "B2", "liters": 42}])
         self.assertEqual(next(r for r in draft["receipts"] if r["id"] == "B2")["liters"], "42.000")
-        self.assertFalse(draft["receipts_confirmed"])
         # Gemini may not touch rows that do not exist or invent a date outside the month.
         draft = self.chat(sid, "Zmeň J99", operations=[{"action": "update_trip", "row": "J99", "day": self.day(3)},
                                                        {"action": "update_trip", "row": "J1", "day": "2000-01-01"}])
         self.assertIn("J99 v koncepte neexistuje", draft["messages"][-1]["text"])
-        draft = self.ok(self.admin.post(f"/api/assistant/{sid}/confirm-receipts"))
         self.assertTrue(draft["can_approve"])
 
         # Page reload: everything comes back from the server-side draft.
@@ -210,7 +205,9 @@ class AssistantFlowTests(unittest.TestCase):
 
         # Approval: stale version rejected, then one transaction, then idempotent repeat.
         self.ok(self.admin.post(f"/api/assistant/{sid}/approve", json={"version": draft["version"] - 1}), 409)
-        saved = self.ok(self.admin.post(f"/api/assistant/{sid}/approve", json={"version": draft["version"]}))
+        # the receipts must be confirmed as checked against the originals
+        self.ok(self.admin.post(f"/api/assistant/{sid}/approve", json={"version": draft["version"]}), 409)
+        saved = self.ok(self.admin.post(f"/api/assistant/{sid}/approve", json={"version": draft["version"], "receipts_checked": True}))
         again = self.ok(self.admin.post(f"/api/assistant/{sid}/approve", json={"version": draft["version"]}))
         self.assertEqual(saved["status"], "saved")
         self.assertEqual(saved["result"], again["result"])
@@ -262,9 +259,8 @@ class AssistantFlowTests(unittest.TestCase):
         draft = self.ok(self.admin.post(f"/api/assistant/{sid}/operations",
                                         json={"operations": [{"action": "dismiss_duplicate", "row": "B1"}]}))
         self.assertTrue(any("uložené z mesačného sprievodcu" in p for p in draft["receipt_problems"]))
-        self.assertFalse(draft["can_confirm"])
+        self.assertFalse(draft["can_approve"])
         self.ok(self.admin.post(f"/api/assistant/{sid}/operations", json={"operations": [{"action": "delete_receipt", "row": "B1"}]}))
-        draft = self.ok(self.admin.post(f"/api/assistant/{sid}/confirm-receipts"))
         draft = self.chat(sid, "Začiatok 12 240, koniec 13 280. Raz Bratislava, dvakrát Trenčín.",
                           "Harmonogram bol vytvorený.", start_odo=12240, end_odo=13280, create_plan=True,
                           routes=[{"destination": "Bratislava", "count": 1, "approximate_km": 300, "category": "mimo mesto", "days": []},
@@ -348,7 +344,6 @@ class AssistantFlowTests(unittest.TestCase):
             "name": "Štart v polovici", "registration": "TEST-START", "start_date": self.day(15), "initial_odo": 1000,
             "capacity": 50, "initial_liters": 20, "city_rate": 7, "outside_rate": 6}))
         sid = self.ok(self.admin.post(f"/api/vehicles/{vehicle['id']}/assistant", json={"month": self.month.isoformat()}))["id"]
-        self.ok(self.admin.post(f"/api/assistant/{sid}/confirm-receipts"))
         draft = self.chat(sid, "Začiatok -5 km", start_odo=-5)
         self.assertEqual(draft["start_odo"], 1000)  # prefilled from the logbook, the invalid value is ignored
         self.assertIn("mimo povoleného rozsahu", draft["messages"][-1]["text"])
@@ -364,10 +359,9 @@ class AssistantFlowTests(unittest.TestCase):
         FAKE.queue["ReceiptExtraction"].append({"is_receipt": True, "receipts": [self.receipt(self.day(3), 20, 33)]})
         draft = self.ok(self.admin.post(f"/api/assistant/{sid}/extract"))
         self.assertTrue(any("pred začiatkom evidencie" in p for p in draft["receipt_problems"]))
-        self.assertFalse(draft["can_confirm"])
+        self.assertFalse(draft["can_approve"])
         saved_draft = self.ok(self.admin.post(f"/api/assistant/{sid}/operations",
                                               json={"operations": [{"action": "delete_receipt", "row": "B1"}]}))
-        saved_draft = self.ok(self.admin.post(f"/api/assistant/{sid}/confirm-receipts"))
         saved = self.ok(self.admin.post(f"/api/assistant/{sid}/approve", json={"version": saved_draft["version"]}))
         # The old monthly-draft approval endpoint refuses assistant drafts instead of crashing.
         response = self.admin.post(f"/api/vehicles/{vehicle['id']}/monthly-drafts/{saved['result']['draft_id']}/approve",
@@ -399,7 +393,6 @@ class AssistantFlowTests(unittest.TestCase):
         fuel_key = draft["saved"]["fuels"][0]["key"]
         self.assertIn(fuel_key, draft["tank"]["rows"])
 
-        self.ok(self.admin.post(f"/api/assistant/{sid}/confirm-receipts"))
         draft = self.chat(sid, "Koniec 5 600, dvakrát Košice a raz Poprad.", end_odo=5600, routes=[
             {"destination": "Košice", "count": 2, "category": "mimo mesto", "days": []},
             {"destination": "Poprad", "count": 1, "category": "mimo mesto", "days": []}])

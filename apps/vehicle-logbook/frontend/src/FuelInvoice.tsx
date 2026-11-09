@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Alert, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, useMediaQuery } from '@mui/material';
-import { api, errorText, fmt } from './api';
+import { api, dateLabel, errorText, fmt, plural } from './api';
 import { Icon } from './icons';
 
 type InvoiceRow = { voucher: string; day: string; clock: string; station: string; product: string; liters: number; gross: number;
@@ -11,8 +11,6 @@ type Preview = { number: string; issued: string | null; total: number; digest: s
 type Result = { number: string; written: number; vehicles: number;
   skipped: { plate: string; day: string; liters: number; gross: number; reason: string }[] };
 
-const day = (iso: string) => { const [y, m, d] = iso.slice(0, 10).split('-'); return `${Number(d)}. ${Number(m)}. ${y}`; };
-const plural = (n: number, one: string, few: string, many: string) => n === 1 ? one : n >= 2 && n <= 4 ? few : many;
 
 /** Súhrnná faktúra z tankovacích kariet (FleetCor): náhľad rozdelený podľa ŠPZ, potom zápis tankovaní (iba správca). */
 export function FuelInvoiceDialog({ close, done }: { close: () => void; done: (message: string) => void }) {
@@ -43,7 +41,7 @@ export function FuelInvoiceDialog({ close, done }: { close: () => void; done: (m
         <Alert severity="success">Zapísané {result.written} {plural(result.written, 'tankovanie', 'tankovania', 'tankovaní')} do {result.vehicles} {plural(result.vehicles, 'vozidla', 'vozidiel', 'vozidiel')} z faktúry {result.number}.</Alert>
         {result.skipped.length > 0 && <Alert severity="warning" sx={{ mt: 2 }}>
           <b>Nezapísané ({result.skipped.length}):</b>
-          <ul className="invoice-skipped">{result.skipped.map((s, i) => <li key={i}><b>{s.plate || 'bez ŠPZ'}</b> {day(s.day)} · {fmt(s.liters)} l · {fmt(s.gross)} € – {s.reason}</li>)}</ul>
+          <ul className="invoice-skipped">{result.skipped.map((s, i) => <li key={i}><b>{s.plate || 'bez ŠPZ'}</b> {dateLabel(s.day)} · {fmt(s.liters)} l · {fmt(s.gross)} € – {s.reason}</li>)}</ul>
           Tieto tankovania doplňte ručne, alebo najprv pridajte vozidlo a zapíšte ich z bločku.
         </Alert>}
       </> : <>
@@ -56,9 +54,9 @@ export function FuelInvoiceDialog({ close, done }: { close: () => void; done: (m
         </div>
         {problem && <Alert severity="error" sx={{ mt: 2 }}>{problem}</Alert>}
         {preview && <section className="invoice-preview">
-          <h3>Faktúra {preview.number}{preview.issued && <> · {day(preview.issued)}</>} · {fmt(preview.total)} €</h3>
+          <h3>Faktúra {preview.number}{preview.issued && <> · {dateLabel(preview.issued)}</>} · {fmt(preview.total)} €</h3>
           {preview.already
-            ? <Alert severity="error">Táto faktúra už bola zapísaná{preview.imported_at && <> ({day(preview.imported_at)})</>}. Druhýkrát sa nezapíše.</Alert>
+            ? <Alert severity="error">Táto faktúra už bola zapísaná{preview.imported_at && <> ({dateLabel(preview.imported_at)})</>}. Druhýkrát sa nezapíše.</Alert>
             : <Alert severity={preview.skip ? 'warning' : 'info'}>
               Zapíše sa <b>{preview.write}</b> {plural(preview.write, 'tankovanie', 'tankovania', 'tankovaní')} do {vehicles} {plural(vehicles, 'vozidla', 'vozidiel', 'vozidiel')}.
               {preview.skip > 0 && <> Nezapíše sa <b>{preview.skip}</b> – dôvod je pri každom riadku.</>}
@@ -71,7 +69,7 @@ export function FuelInvoiceDialog({ close, done }: { close: () => void; done: (m
               <span className="invoice-card-sum">{fmt(c.rows.reduce((s, r) => s + Number(r.liters), 0))} l · {fmt(c.rows.reduce((s, r) => s + Number(r.gross), 0))} €</span>
             </div>
             {c.rows.map(r => <div key={r.voucher} className={'invoice-row' + (r.write ? '' : ' skip')}>
-              <span className="invoice-day">{day(r.day)} <small>{r.clock}</small></span>
+              <span className="invoice-day">{dateLabel(r.day)} <small>{r.clock}</small></span>
               <span className="invoice-station">{r.station}<small>{r.product}</small></span>
               <span className="num">{fmt(r.liters)} l</span>
               <span className="num">{fmt(r.gross)} €</span>

@@ -5,7 +5,7 @@ import {
   Alert, Button, Chip, CircularProgress, CssBaseline, Dialog, DialogActions, DialogContent, DialogTitle,
   IconButton, MenuItem, Paper, Popover, Snackbar, TextField, ThemeProvider, Tooltip, createTheme, useMediaQuery,
 } from '@mui/material';
-import { api, errorText, fmt, localDay, monthName, type Account, type Entry, type Preview, type Report, type Row } from './api';
+import { api, dateLabel, errorText, fmt, localDay, monthName, type Account, type Entry, type Preview, type Report, type Row } from './api';
 import { DeleteVehicleDialog, destinationFields, fuelFields, RecordDialog, tripFields, UserDialog, vehicleFields, type Edit } from './forms';
 import { Icon } from './icons';
 import { FuelInvoiceDialog } from './FuelInvoice';
@@ -64,7 +64,6 @@ function dayLabel(value: unknown) {
   const date = new Date(text.slice(0,10)+'T12:00:00Z');
   return `${date.getUTCDate()}. ${date.getUTCMonth()+1}.`+' '+weekday.format(date);
 }
-const dateLabel = (value: unknown) => { const [y,m,d] = String(value ?? '').split('-'); return d ? `${Number(d)}. ${Number(m)}. ${y}` : '—'; };
 function shiftMonth(year:number, month:number, by:number) {
   const index = year*12 + month - 1 + by; return { year: Math.floor(index/12), month: index%12 + 1 };
 }
@@ -530,8 +529,7 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
           {gate}
           {ready&&!wizardAllowed&&<Alert severity="info">Mesiac sa dá vyplniť až po jeho skončení.</Alert>}
           {ready&&wizardAllowed&&<MonthlyWizard key={String(vehicleId)+'-'+year+'-'+month} vehicle={vehicle!}
-            month={monthKey(year,month)} openingOdo={Number(report.opening_odo)}
-            destinations={destinations} onSaved={()=>{setNotice('Mesiac je uložený.');setRefresh(v=>v+1);}} exportUrl={format=>exportLink(format)}/>}
+            month={monthKey(year,month)} onSaved={()=>{setNotice('Mesiac je uložený.');setRefresh(v=>v+1);}} exportUrl={format=>exportLink(format)}/>}
         </>} />
         <Route path="/jazdy" element={renderRecords('trips')} />
         <Route path="/tankovanie" element={renderRecords('fuel')} />

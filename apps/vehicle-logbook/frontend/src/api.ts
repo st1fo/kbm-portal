@@ -24,3 +24,11 @@ export function fmt(value: Value, places = 2) {
 export const monthName = (month: number) =>
   new Intl.DateTimeFormat('sk-SK', { month: 'long', timeZone: 'UTC' })
     .format(new Date(Date.UTC(2025, month - 1, 1)));
+/** ISO date (or datetime) as „9. 11. 2026“. */
+export const dateLabel = (value: unknown) => {
+  const [y, m, d] = String(value ?? '').slice(0, 10).split('-');
+  return d ? `${Number(d)}. ${Number(m)}. ${y}` : '—';
+};
+/** Slovak noun form for a count: 1 tankovanie, 2–4 tankovania, 0 or 5+ tankovaní. */
+export const plural = (count: number, one: string, few: string, many: string) =>
+  count === 1 ? one : count >= 2 && count <= 4 ? few : many;

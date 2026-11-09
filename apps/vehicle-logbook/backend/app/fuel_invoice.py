@@ -47,6 +47,10 @@ def fuel_kind(text: str) -> str:
     return ""
 
 
+def is_fuel(product: str) -> bool:
+    return bool(fuel_kind(product)) or any(w in (product or "").casefold() for w in FUEL_WORDS)
+
+
 def lines_of(content: bytes) -> list[str]:
     import pdfplumber
     try:
@@ -67,17 +71,19 @@ def parse(content: bytes) -> dict:
     issued = re.search(r"Dátum faktúry (\d\d\.\d\d\.\d{4})", text)
     products, in_products = [], False
     for line in lines:
-        if line.startswith("Prehľad produktov"): in_products = True; continue
-        if in_products:
-            if line.startswith("Celkom"): in_products = False; continue
-            m = PRODUCT.match(line)
-            if m: products.append(m["name"])
+        if line.startswith("Prehľad produktov"):
+            in_products = True
+        elif in_products and line.startswith("Celkom"):
+            in_products = False
+        elif in_products and (m := PRODUCT.match(line)):
+            products.append(m["name"])
     products.sort(key=len, reverse=True)
 
     cards, card, expect_card, grand = [], None, False, None
     for line in lines:
         if line.startswith("Číslo karty"):
-            expect_card = True; continue
+            expect_card = True
+            continue
         if expect_card:
             expect_card = False
             parts = line.split()
@@ -99,7 +105,8 @@ def parse(content: bytes) -> dict:
             continue
         m = CARD_TOTAL.match(line)
         if m and card is not None:
-            card["total"] = dec(m["gross"]); continue
+            card["total"] = dec(m["gross"])
+            continue
         m = GRAND_TOTAL.match(line)
         if m: grand = dec(m["gross"])
     rows = [r for c in cards for r in c["rows"]]
@@ -138,7 +145,7 @@ def check(db, parsed: dict) -> dict:
                 reason = f"Vozidlo {c['plate']} nie je v Knihe jázd."
             elif r["gross"] <= 0 or r["liters"] <= 0:
                 reason = "Dobropis alebo oprava (záporná suma) – zapíšte ručne."
-            elif not fuel_kind(r["product"]) and not any(w in r["product"].casefold() for w in FUEL_WORDS):
+            elif not is_fuel(r["product"]):
                 reason = f"Nie je to palivo ({r['product'] or 'neznámy produkt'})."
             elif day < v.start_date:
                 reason = f"Dátum je pred začiatkom evidencie vozidla ({v.start_date:%d. %m. %Y})."
@@ -160,7 +167,8 @@ def check(db, parsed: dict) -> dict:
                     r["warnings"].append(f"Palivo vozidla je {v.fuel_type}, natankované bolo {r['product']}.")
             r["write"] = not reason
             r["reason"] = reason
-            write += r["write"]; skip += not r["write"]
+            write += r["write"]
+            skip += not r["write"]
     parsed.update(already=bool(existing), write=write, skip=skip,
                   imported_at=existing.created_at.isoformat() if existing else None)
     return parsed

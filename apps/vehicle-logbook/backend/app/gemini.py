@@ -10,9 +10,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
-# Cheapest stable multimodal model available to new Gemini API projects (11/2026).
-DEFAULT_MODEL = "gemini-3.6-flash"
-TIMEOUT_MS = 60_000
+DEFAULT_MODEL = "gemini-3.6-flash"   # Flash, not Lite: the lite model ignored the structured routes too often
+TIMEOUT_MS = 60_000                  # per try; the gateway waits 150 s, enough for the main and the fallback model
 
 
 class AssistantError(RuntimeError):
@@ -175,8 +174,14 @@ client_factory = _client
 
 
 def fallback_model():
-    """Lighter model used once when the main one is overloaded (503/429/5xx)."""
+    """Lighter model tried once when the main one is overloaded or too slow."""
     return os.getenv("GEMINI_FALLBACK_MODEL", "").strip() or "gemini-3.1-flash-lite"
+
+
+def overloaded(error):
+    """Rate limit, server error or timeout: worth one more try with the fallback model."""
+    code = getattr(error, "code", None) or getattr(error, "status_code", None)
+    return code in (429, 500, 503, 504) or "timeout" in type(error).__name__.lower() or "timed out" in str(error).lower()
 
 
 def _config(schema, system, model=None):
@@ -204,10 +209,8 @@ def _generate(contents, schema, system):
         except AssistantError:
             raise
         except Exception as error:  # SDK, network and quota errors all end in a readable message
-            code = getattr(error, "code", None) or getattr(error, "status_code", None)
-            slow = "timeout" in type(error).__name__.lower() or "timed out" in str(error).lower()
-            if (code in (429, 500, 503, 504) or slow) and index + 1 < len(models):
-                continue  # overloaded: one more try with the lighter model
+            if overloaded(error) and index + 1 < len(models):
+                continue
             raise AssistantError(_describe(error)) from error
     text = getattr(response, "text", None)
     if not text:

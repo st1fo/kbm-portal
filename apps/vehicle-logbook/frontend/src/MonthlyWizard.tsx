@@ -3,49 +3,42 @@ import {
   Alert, Button, Checkbox, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Menu, MenuItem,
   FormControlLabel, Paper, Switch, Tab, Tabs, TextField, Tooltip, useMediaQuery,
 } from '@mui/material';
-import { api, errorText, fmt, monthName, type Row } from './api';
+import { api, dateLabel, errorText, fmt, monthName, plural, type Row } from './api';
 
 type FileItem = { id:string; name:string; mime:string; size:number; status:'pending'|'done'|'error'; error:string|null; url:string };
-type Receipt = { id:string; file_id:string|null; file_name:string|null; source:string; day:string|null; station:string;
-  liters:string|null; gross:string|null; currency:string; vat:string|null; odo:number|null; confirmed:boolean;
-  duplicate:string|null; duplicate_ok:boolean; missing:string[]; unreadable:string[] };
-type Trip = { id:string; day:string; origin:string; destination:string; category:string; purpose:string; distance:number;
-  start_odo:number; end_odo:number; approximate_km:number|null; day_confirmed:boolean; km_confirmed:boolean; warning:string|null };
-type SavedTrip = { key:string; day:string; origin:string; destination:string; purpose:string; category:string; distance:number;
-  start_odo:number; end_odo:number; estimated:boolean };
-type SavedFuel = { key:string; day:string; station:string; liters:string; gross:string; odo:number|null; note:string };
-type Message = { role:'user'|'assistant'|'error'; text:string; at:string; changed:string[] };
-type Route = { destination:string; count:number; approximate_km:number|null; category:string; days:string[] };
+type Receipt = { id:string; file_id:string|null; day:string|null; station:string; liters:string|null; gross:string|null;
+  currency:string; odo:number|null; duplicate:string|null; duplicate_ok:boolean; missing:string[]; unreadable:string[] };
+type Trip = { id:string; day:string; destination:string; category:string; purpose:string; distance:number;
+  start_odo:number; end_odo:number; day_confirmed:boolean; km_confirmed:boolean; warning:string|null };
+type SavedTrip = { key:string; day:string; destination:string; distance:number; start_odo:number; end_odo:number };
+type SavedFuel = { key:string; day:string; station:string; liters:string; gross:string; note:string };
+type Message = { role:'user'|'assistant'|'error'; text:string; changed:string[] };
+type Route = { destination:string; count:number; approximate_km:number|null };
 type Day = { day:string; holiday:boolean; weekend:boolean; before_start:boolean; after_reading:boolean };
 type Draft = { id:string; status:'draft'|'saved'; version:number; month:string; error:string|null;
   start_odo:number|null; end_odo:number|null; end_day:string|null; closing:{ day:string; odo:number|null; estimated:boolean }; days:Day[]; expected_start:number; distance:number|null; planned:number;
-  files:FileItem[]; receipts:Receipt[]; receipts_confirmed:boolean; receipt_problems:string[]; trips:Trip[];
+  files:FileItem[]; receipts:Receipt[]; receipt_problems:string[]; trips:Trip[];
   problems:string[]; stale:boolean; messages:Message[]; highlight:string[]; routes:Route[];
-  can_confirm:boolean; can_plan:boolean; can_approve:boolean; origin:string; replace_existing:boolean;
-  existing:{count:number; replaceable:number; manual:number; km:number; manual_km:number};
+  can_approve:boolean; origin:string; replace_existing:boolean;
+  existing:{replaceable:number; manual:number; km:number; manual_km:number};
   saved:{km:number; trips:SavedTrip[]; fuels:SavedFuel[]};
-  tank:{opening:string; purchased:string; consumed:string; closing:string; capacity:string; planned:boolean;
-    rows:Record<string,{before:string; after:string}>; days:Record<string,string>; warnings:string[]}|null;
+  tank:{opening:string; purchased:string; closing:string; planned:boolean; days:Record<string,string>; warnings:string[]}|null;
   assistant:{configured:boolean; model:string}; limits:{file_mb:number; files:number; message:number; types:string[]} };
 type Operation = Record<string, string | number | boolean | string[] | null | undefined> & { action:string };
 
-const plural = (n: number, one: string, few: string, many: string) => n === 1 ? one : n >= 2 && n <= 4 ? few : many;
-const fmtDay = (iso: string) => { const [y, m, d] = iso.slice(0, 10).split('-'); return `${Number(d)}. ${Number(m)}. ${y}`; };
-
 const receiptLabels: Record<string,string> = { day:'dátum', liters:'litre', gross:'suma', currency:'mena', station:'stanica', odo:'tachometer' };
 
-/** Editable field: saves on blur or Enter, shows the server value otherwise. */
-function Cell({ value, onSave, type='text', error, label, width=110, disabled, select, children, full, helper }:
+/** Editable field in the row dialog: saves on blur or Enter, shows the server value otherwise. */
+function Cell({ value, onSave, type='text', error, label, disabled, select, children, helper }:
   { value:string|number|null|undefined; onSave:(text:string)=>void; type?:string; error?:boolean; label:string;
-    width?:number; disabled?:boolean; select?:boolean; children?:ReactNode; full?:boolean; helper?:string }) {
+    disabled?:boolean; select?:boolean; children?:ReactNode; helper?:string }) {
   const current = value == null ? '' : String(value);
   const [text, setText] = useState(current);
   useEffect(() => setText(current), [current]);
   const commit = (next = text) => { if (next.trim() !== current) onSave(next.trim()); };
-  return <TextField variant={full ? 'outlined' : 'standard'} size="small" type={type} value={text} error={error} disabled={disabled}
-    select={select} sx={full ? undefined : { width }} fullWidth={full} label={full ? label : undefined} helperText={helper}
-    slotProps={{ htmlInput: { 'aria-label': label, step: 'any' }, inputLabel: full && type === 'date' ? { shrink: true } : undefined }}
-    placeholder={error ? 'doplniť' : ''}
+  return <TextField size="small" fullWidth type={type} value={text} error={error} disabled={disabled} select={select}
+    label={label} helperText={helper} placeholder={error ? 'doplniť' : ''}
+    slotProps={{ htmlInput: { step: 'any' }, inputLabel: type === 'date' ? { shrink: true } : undefined }}
     onChange={event => { setText(event.target.value); if (select) commit(event.target.value); }}
     onBlur={() => { if (!select) commit(); }}
     onKeyDown={event => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur(); }}>{children}</TextField>;
@@ -54,7 +47,7 @@ function Cell({ value, onSave, type='text', error, label, width=110, disabled, s
 const WEEKDAYS = ['Ne', 'Po', 'Ut', 'St', 'Št', 'Pi', 'So'];
 
 export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
-  { vehicle:Row; month:string; openingOdo:number; destinations:Row[]; onSaved:()=>void; exportUrl:(format:string)=>string }) {
+  { vehicle:Row; month:string; onSaved:()=>void; exportUrl:(format:string)=>string }) {
   const [draft, setDraft] = useState<Draft>();
   const [problem, setProblem] = useState('');
   const [loading, setLoading] = useState(true);
@@ -184,7 +177,13 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
   const receipt = editing?.kind === 'receipt' ? draft.receipts.find(item => item.id === editing.id) : undefined;
   const receiptFile = receipt && draft.files.find(item => item.id === receipt.file_id);
   const flagged = (item: Receipt, field: string) => item.missing.includes(field) || item.unreadable.includes(field);
-  const needsReview = draft.receipts.length > 0 && !draft.receipts_confirmed;
+  const needsReview = draft.receipts.length > 0;
+  const approveText = [
+    `Uložiť ${draft.trips.length} jázd (${fmt(draft.planned - draft.saved.km, 0)} km) a ${draft.receipts.length} tankovaní do knihy jázd?`,
+    draft.saved.km || draft.saved.fuels.length ? 'Jazdy a tankovania, ktoré už sú v knihe, zostanú bez zmeny.' : '',
+    draft.replace_existing ? `Nahradí sa ${draft.existing.replaceable} skôr uložených odhadovaných jázd.` : '',
+    'Odhadované jazdy zostanú vo výkaze označené.'].filter(Boolean).join(' ');
+  const readDay = draft.end_day ?? draft.days[draft.days.length - 1].day;
   let level = draft.tank ? Number(draft.tank.opening) : 0;
 
   const receiptButton = (item: Receipt) => <button key={rowKey(item.id)} type="button" disabled={locked}
@@ -210,13 +209,13 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
         <TextField size="small" type="number" label="Tachometer na konci (km)" disabled={locked}
           key={'e' + draft.end_odo} defaultValue={draft.end_odo ?? ''} className={lit.has('odo') ? 'changed-field' : ''}
           helperText={draft.end_odo == null ? 'Doplňte alebo napíšte asistentovi' : close.estimated
-            ? `Stav k ${fmtDay(close.day)} odhadnutý na ${fmt(close.odo, 0)} km` : ' '}
+            ? `Stav k ${dateLabel(close.day)} odhadnutý na ${fmt(close.odo, 0)} km` : ' '}
           onBlur={event => { if (event.target.value !== String(draft.end_odo ?? '')) void odometer('end_odo', event.target.value); }} />
         <TextField size="small" type="date" label="Odčítané dňa" disabled={locked}
-          key={'d' + (draft.end_day ?? '')} defaultValue={draft.end_day ?? draft.days[draft.days.length - 1].day}
+          key={'d' + (draft.end_day ?? '')} defaultValue={readDay}
           className={lit.has('odo') ? 'changed-field' : ''} slotProps={{ inputLabel: { shrink: true } }}
           helperText={draft.end_day ? (close.estimated ? 'po konci mesiaca – zvyšok ide do ďalšieho' : 'jazdy sa navrhnú do tohto dňa') : 'posledný deň mesiaca'}
-          onBlur={event => { const value = event.target.value; if (value && value !== (draft.end_day ?? draft.days[draft.days.length - 1].day))
+          onBlur={event => { const value = event.target.value; if (value && value !== readDay)
             void operate([{ action: 'set_odometers', end_day: value }]); }} />
       </div>
       <div className="month-sum">
@@ -331,7 +330,7 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
           label={`Údaje z ${draft.receipts.length === 1 ? 'bločku' : 'bločkov'} (${draft.receipts.length}) som skontroloval/a podľa originálov`} />}
         <div className="actions" style={{ marginTop: 12 }}>
           <Button size="large" variant="contained" color="success" disabled={!draft.can_approve || locked || (needsReview && !checked)}
-            onClick={() => setConfirm({ text: `Uložiť ${draft.trips.length} jázd (${fmt(draft.planned - draft.saved.km, 0)} km) a ${draft.receipts.length} tankovaní do knihy jázd?${draft.saved.km || draft.saved.fuels.length ? ' Jazdy a tankovania, ktoré už sú v knihe, zostanú bez zmeny.' : ''}${draft.replace_existing ? ` Nahradí sa ${draft.existing.replaceable} skôr uložených odhadovaných jázd.` : ''} Odhadované jazdy zostanú vo výkaze označené.`, run: approve })}>
+            onClick={() => setConfirm({ text: approveText, run: approve })}>
             Schváliť a uložiť výkaz</Button>
           <Button color="error" disabled={locked} onClick={() => setConfirm({ text: 'Zahodiť celý koncept vrátane chatu a nahraných bločkov?', run: discard })}>Zahodiť koncept</Button>
         </div>
@@ -342,12 +341,12 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
       {trip && <>
         <DialogTitle>Jazda {trip.id}</DialogTitle>
         <DialogContent className="edit-dialog">
-          <Cell full label="Dátum" type="date" value={trip.day} disabled={locked} onSave={value => void tripEdit(trip, 'day', value)} />
-          <Cell full label="Cieľ" value={trip.destination} disabled={locked} onSave={value => void tripEdit(trip, 'destination', value)} />
-          <Cell full label="Účel" value={trip.purpose} disabled={locked} onSave={value => void tripEdit(trip, 'purpose', value)} />
-          <Cell full label="Typ" select value={trip.category} disabled={locked} onSave={value => void tripEdit(trip, 'category', value)}>
+          <Cell label="Dátum" type="date" value={trip.day} disabled={locked} onSave={value => void tripEdit(trip, 'day', value)} />
+          <Cell label="Cieľ" value={trip.destination} disabled={locked} onSave={value => void tripEdit(trip, 'destination', value)} />
+          <Cell label="Účel" value={trip.purpose} disabled={locked} onSave={value => void tripEdit(trip, 'purpose', value)} />
+          <Cell label="Typ" select value={trip.category} disabled={locked} onSave={value => void tripEdit(trip, 'category', value)}>
             <MenuItem value="mesto">mesto</MenuItem><MenuItem value="mimo mesto">mimo mesta</MenuItem></Cell>
-          <Cell full label="Kilometre" type="number" value={trip.distance} disabled={locked} onSave={value => void tripEdit(trip, 'km', value)}
+          <Cell label="Kilometre" type="number" value={trip.distance} disabled={locked} onSave={value => void tripEdit(trip, 'km', value)}
             helper={trip.km_confirmed ? 'potvrdené vami – vymažte, ak ich má dopočítať systém' : 'dopočítané z tachometra; zadajte, ak ich poznáte'} />
           <p className="muted">Tachometer {fmt(trip.start_odo, 0)} → {fmt(trip.end_odo, 0)} km · {trip.day_confirmed ? 'dátum potvrdený' : 'dátum odhadnutý'}</p>
           {trip.warning && <Alert severity="warning">{trip.warning}</Alert>}
@@ -359,13 +358,13 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
         <DialogTitle>Bloček {receipt.id}</DialogTitle>
         <DialogContent className="edit-dialog">
           {receiptFile && <Button size="small" onClick={() => setPreview(receiptFile)}>Zobraziť originál ({receiptFile.name})</Button>}
-          <Cell full label="Dátum" type="date" value={receipt.day} error={flagged(receipt, 'day')} disabled={locked} onSave={value => void receiptEdit(receipt, 'day', value)} />
-          <Cell full label="Stanica" value={receipt.station} error={flagged(receipt, 'station')} disabled={locked} onSave={value => void receiptEdit(receipt, 'station', value)} />
-          <Cell full label="Litre" value={receipt.liters && Number(receipt.liters)} error={flagged(receipt, 'liters')} disabled={locked} onSave={value => void receiptEdit(receipt, 'liters', value)} />
-          <Cell full label="Suma s DPH (€)" value={receipt.gross && Number(receipt.gross)} error={flagged(receipt, 'gross')} disabled={locked} onSave={value => void receiptEdit(receipt, 'gross', value)} />
-          <Cell full label="Tachometer (km)" type="number" value={receipt.odo} error={receipt.unreadable.includes('odo')} disabled={locked}
+          <Cell label="Dátum" type="date" value={receipt.day} error={flagged(receipt, 'day')} disabled={locked} onSave={value => void receiptEdit(receipt, 'day', value)} />
+          <Cell label="Stanica" value={receipt.station} error={flagged(receipt, 'station')} disabled={locked} onSave={value => void receiptEdit(receipt, 'station', value)} />
+          <Cell label="Litre" value={receipt.liters && Number(receipt.liters)} error={flagged(receipt, 'liters')} disabled={locked} onSave={value => void receiptEdit(receipt, 'liters', value)} />
+          <Cell label="Suma s DPH (€)" value={receipt.gross && Number(receipt.gross)} error={flagged(receipt, 'gross')} disabled={locked} onSave={value => void receiptEdit(receipt, 'gross', value)} />
+          <Cell label="Tachometer (km)" type="number" value={receipt.odo} error={receipt.unreadable.includes('odo')} disabled={locked}
             helper="iba ak je na bločku" onSave={value => void receiptEdit(receipt, 'odo', value)} />
-          {receipt.currency && receipt.currency !== 'EUR' && <Cell full label="Mena" value={receipt.currency} error disabled={locked} onSave={value => void receiptEdit(receipt, 'currency', value)} />}
+          {receipt.currency && receipt.currency !== 'EUR' && <Cell label="Mena" value={receipt.currency} error disabled={locked} onSave={value => void receiptEdit(receipt, 'currency', value)} />}
           {receipt.missing.length > 0 && <Alert severity="error">Doplňte: {receipt.missing.map(field => receiptLabels[field]).join(', ')}</Alert>}
           {receipt.duplicate && !receipt.duplicate_ok && <Alert severity="warning" action={!receipt.duplicate.includes('mesačného sprievodcu') &&
             <Button size="small" disabled={locked} onClick={() => void operate([{ action: 'dismiss_duplicate', row: receipt.id }])}>Nie je duplicita</Button>}>
@@ -382,11 +381,13 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
     {!draft.assistant.configured && <Alert severity="warning" className="chat-alert">Asistent Gemini nie je na serveri nastavený
       (chýba GEMINI_API_KEY). Koncept funguje ďalej – bločky, tachometre a jazdy zadajte ručne v náhľade.</Alert>}
     <div className="chat-log" aria-live="polite">
-      {draft.messages.map((item, index) => <div key={index} className={'bubble ' + item.role}>
-        {item.role === 'error' && <b>Asistent je nedostupný. </b>}{item.text}
-        {item.changed.filter(id => /^[BJ]\d+$/.test(id)).length > 0 && <div className="bubble-tags">
-          {item.changed.filter(id => /^[BJ]\d+$/.test(id)).slice(0, 12).map(id => <span key={id}>{id}</span>)}</div>}
-      </div>)}
+      {draft.messages.map((item, index) => {
+        const rows = item.changed.filter(id => /^[BJ]\d+$/.test(id)).slice(0, 12);
+        return <div key={index} className={'bubble ' + item.role}>
+          {item.role === 'error' && <b>Asistent je nedostupný. </b>}{item.text}
+          {rows.length > 0 && <div className="bubble-tags">{rows.map(id => <span key={id}>{id}</span>)}</div>}
+        </div>;
+      })}
       {busy && <div className="bubble assistant pending"><CircularProgress size={14} /> {busy}</div>}
       <div ref={chatEnd} />
     </div>

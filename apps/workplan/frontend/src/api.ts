@@ -11,3 +11,8 @@ export async function api<T=any>(path:string,method='GET',data?:unknown):Promise
 }
 export const localDay=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Bratislava'}).format(new Date());
 export const dateLabel=(d:string)=>new Date(d+'T12:00:00').toLocaleDateString('sk-SK');
+/** Stiahne súbor z API (export) pod daným názvom; pri chybe vyhodí `message`. */
+export async function downloadFile(url:string,name:string,message:string){
+  const r=await fetch(url);if(!r.ok)throw new Error(message);
+  const href=URL.createObjectURL(await r.blob());const a=document.createElement('a');a.href=href;a.download=name;a.click();URL.revokeObjectURL(href);
+}

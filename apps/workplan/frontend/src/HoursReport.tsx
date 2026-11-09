@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, ChevronDown, Download, Loader2 } from 'lucide-react';
 import { Fragment, useState } from 'react';
-import { api, dateLabel, hrs } from './api';
+import { api, dateLabel, downloadFile, hrs } from './api';
 
 type Day = { date: string; weekday: string; workday: boolean; plan: string; worked: number; absence: { type: string; hours: number; note?: string }[]; flag: string; note: string };
 type Person = { user_id: number; name: string; daily_hours: number; fund: number; worked: number; holiday: number; absences: Record<string, number>; absence_total: number; difference: number; missing: string[]; days: Day[] };
@@ -20,10 +20,7 @@ export function HoursReport({ month, group, isAdmin }: { month: string; group: s
   async function download() {
     setBusy(true); setError('');
     try {
-      const r = await fetch('/workplan/api/hours/export?' + params);
-      if (!r.ok) throw new Error('Export sa nepodaril. Obnovte stránku a skúste znova.');
-      const url = URL.createObjectURL(await r.blob());
-      const a = document.createElement('a'); a.href = url; a.download = `KBM-vykaz-hodin-${month}.xlsx`; a.click(); URL.revokeObjectURL(url);
+      await downloadFile('/workplan/api/hours/export?' + params, `KBM-vykaz-hodin-${month}.xlsx`, 'Export sa nepodaril. Obnovte stránku a skúste znova.');
     } catch (e) { setError((e as Error).message); }
     setBusy(false);
   }
@@ -40,7 +37,7 @@ export function HoursReport({ month, group, isAdmin }: { month: string; group: s
       <thead><tr><th>Zamestnanec</th><th className="num">Fond</th><th className="num">Odpracované</th>
         {d.types.map(t => <th key={t} className="num">{t}</th>)}<th className="num">Sviatky</th><th className="num">Rozdiel</th><th className="num">Bez záznamu</th></tr></thead>
       <tbody>{d.people.map(p => {
-        const notable = p.days.filter(x => x.absence.length || x.flag === 'missing' || x.flag === 'weekend' || x.flag === 'holiday_work');
+        const notable = p.days.filter(x => x.absence.length || FLAGS[x.flag]);
         const isOpen = open === p.user_id;
         return <Fragment key={p.user_id}>
           <tr className={isOpen ? 'open' : ''}>
