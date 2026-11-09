@@ -263,6 +263,7 @@ details > summary { cursor: pointer; }
 .draft-table td { vertical-align: top; padding-top: 8px; padding-bottom: 8px; }
 .draft-row { transition: background-color .4s; }
 .draft-row.changed { box-shadow: inset 4px 0 0 #f59f00; animation: row-flash 2.6s ease-out; }
+.draft-row.book-row td { color: var(--mui-palette-text-secondary, inherit); background: color-mix(in srgb, currentColor 4%, transparent); }
 .changed-field { animation: row-flash 2.6s ease-out; border-radius: 8px; }
 @keyframes row-flash { from { background-color: var(--flash); } to { background-color: transparent; } }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }

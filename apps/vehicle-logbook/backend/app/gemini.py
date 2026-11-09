@@ -124,6 +124,12 @@ Pravidlá:
   čo si z textu pochopil (napr. „Rozumiem: začiatok 12 240 km, koniec 13 280 km, Bratislava 1×, Trenčín 2×.“).
 - Východisko jázd je v DATA (vychodisko, predvolene Žilina). Ak používateľ uvedie iné, vyplň origin.
   approximate_km odhaduj ako vzdialenosť tam a späť z východiska.
+- DATA v_knihe sú tankovania a jazdy tohto mesiaca, ktoré už sú uložené v knihe jázd (napr. z faktúry FleetCor
+  alebo zapísané ručne). Sú iba na čítanie: nemeň ich, nevracaj ich ako bločky (B) ani ako routes. Môžeš o nich
+  odpovedať (napr. koľko litrov sa natankovalo). Systém ich započíta do nádrže a uložené jazdy ponechá; navrhuje iba
+  jazdy pre km_na_navrh. routes preto opisujú iba jazdy, ktoré v knihe ešte nie sú – ak používateľ vymenuje aj
+  uložené jazdy, tie vynechaj; ak to nie je jasné, opýtaj sa. Ak používateľ chce pridať bloček k tankovaniu, ktoré už
+  je v knihe (rovnaký deň a suma), upozorni ho, že by sa započítalo dvakrát.
 - Ak niečo chýba alebo si nie si istý, opýtaj sa v reply a operáciu nevracaj."""
 
 

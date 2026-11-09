@@ -208,21 +208,58 @@ def known_km(db, vehicle, state, destination, origin=None):
 
 
 def month_trips(db, vehicle, month):
-    """Trips already saved in the month: estimates from an earlier monthly draft can be replaced, manual ones not."""
+    """Trips already saved in the month: estimates from an earlier monthly draft can be replaced, manual ones stay
+    and the draft only fills the kilometres between them."""
     rows = list(db.scalars(select(Trip).where(Trip.vehicle_id == vehicle.id, Trip.day >= month, Trip.day < next_month(month))))
     replaceable = [row for row in rows if row.draft_id]
-    return dict(count=len(rows), replaceable=len(replaceable), manual=len(rows) - len(replaceable),
-                km=sum(row.end_odo - row.start_odo for row in rows), ids=[row.id for row in replaceable])
+    manual = [row for row in rows if not row.draft_id]
+    return dict(count=len(rows), replaceable=len(replaceable), manual=len(manual),
+                km=sum(row.end_odo - row.start_odo for row in replaceable),
+                manual_km=sum(row.end_odo - row.start_odo for row in manual), ids=[row.id for row in replaceable])
 
 
-def existing_text(info, month):
+def saved_rows(db, vehicle, session, state):
+    """Fuel purchases and trips of the month already in the logbook (e.g. a FleetCor invoice, trips entered by hand).
+    They are read-only in the draft; trips replaced by this draft (earlier estimates) are left out."""
+    first, stop = session.month, next_month(session.month)
+    replaced = set(month_trips(db, vehicle, first)["ids"]) if state.get("replace_existing") else set()
+    trips = [trip for trip in db.scalars(select(Trip).where(Trip.vehicle_id == vehicle.id, Trip.day >= first, Trip.day < stop)
+                                         .order_by(Trip.day, Trip.start_odo, Trip.id)) if trip.id not in replaced]
+    fuels = list(db.scalars(select(Fuel).where(Fuel.vehicle_id == vehicle.id, Fuel.day >= first, Fuel.day < stop)
+                            .order_by(Fuel.day, Fuel.clock, Fuel.id)))
+    return trips, fuels
+
+
+def existing_text(info, month, manual=True):
     name = f"{month.month}/{month.year}"
-    if info["manual"]:
-        return (f"Mesiac {name} už má v evidencii {info['manual']} ručne zapísaných jázd. Sprievodca ich neprepisuje – "
-                "vyberte mesiac bez jázd alebo ich najprv upravte či odstráňte v Knihe jázd.")
-    return (f"Mesiac {name} už obsahuje {info['replaceable']} jázd ({km(info['km'])}) uložených skôr ako mesačný odhad. "
-            "Ak ich chcete nahradiť týmto návrhom, zapnite vľavo voľbu „Nahradiť uložený odhad“. Staré jazdy sa "
-            "odstránia až pri schválení výkazu, v tej istej transakcii.")
+    parts = []
+    if manual and info["manual"]:
+        parts.append(f"V mesiaci {name} je v knihe jázd už {info['manual']} ručne zapísaných jázd ({km(info['manual_km'])}). "
+                     "Ponechám ich bez zmeny a navrhnem iba jazdy pre zvyšné kilometre.")
+    if info["replaceable"]:
+        parts.append(f"Mesiac {name} už obsahuje {info['replaceable']} jázd ({km(info['km'])}) uložených skôr ako mesačný "
+                     "odhad. Ak ich chcete nahradiť týmto návrhom, zapnite vľavo voľbu „Nahradiť uložený odhad“. Staré "
+                     "jazdy sa odstránia až pri schválení výkazu, v tej istej transakcii.")
+    return " ".join(parts)
+
+
+def saved_text(db, vehicle, session, state):
+    """Greeting line about rows loaded from the logbook."""
+    trips, fuels = saved_rows(db, vehicle, session, state)
+    parts = []
+    if fuels:
+        parts.append(f"{len(fuels)} {'tankovanie' if len(fuels) == 1 else 'tankovania' if len(fuels) < 5 else 'tankovaní'} "
+                     f"({liters(sum((f.liters for f in fuels), D(0)))})")
+    manual = [trip for trip in trips if not trip.draft_id]
+    if manual:
+        parts.append(f"{len(manual)} {'jazdu' if len(manual) == 1 else 'jazdy' if len(manual) < 5 else 'jázd'} "
+                     f"({km(sum(t.end_odo - t.start_odo for t in manual))})")
+    if not parts:
+        return ""
+    text = f"Z knihy jázd som načítal {' a '.join(parts)} z tohto mesiaca. Vidíte ich v tabuľkách so štítkom „v knihe“ a započítam ich."
+    if fuels:
+        text += " Bločky k týmto tankovaniam už nenahrávajte, započítali by sa dvakrát."
+    return text
 
 
 def decimal_text(value, places):
@@ -369,7 +406,14 @@ def anchors(db, vehicle, session, state):
     for receipt in state["receipts"]:
         if receipt.get("odo") is not None and receipt.get("day"):
             points.add((date.fromisoformat(receipt["day"]), receipt["odo"]))
+    for day, start, end in kept_spans(db, vehicle, session, state):
+        points |= {(day, start), (day, end)}
     return sorted(points)
+
+
+def kept_spans(db, vehicle, session, state):
+    """(day, start odo, end odo) of trips that stay in the logbook; the draft plans only the kilometres between them."""
+    return [(trip.day, trip.start_odo, trip.end_odo) for trip in saved_rows(db, vehicle, session, state)[0]]
 
 
 def check_month(db, vehicle, session, state):
@@ -380,30 +424,37 @@ def check_month(db, vehicle, session, state):
         raise Problem(f"Aký bol stav tachometra {' a '.join(missing)} mesiaca?")
     if state["end_odo"] <= state["start_odo"]:
         raise Problem("Koncový stav tachometra musí byť vyšší ako počiatočný. Skontrolujte, prosím, obe hodnoty.")
+    spans = kept_spans(db, vehicle, session, state)
     extra = [(date.fromisoformat(r["day"]), r["odo"]) for r in state["receipts"]
              if r.get("odo") is not None and r.get("day")]
+    extra += [(day, odo) for day, start, end in spans for odo in (start, end)]
     try:
         planner.month_context(db, vehicle, session.month, state["start_odo"], state["end_odo"], today(), extra,
-                              replaceable=state.get("replace_existing", False))
+                              replaceable=state.get("replace_existing", False), keep_manual=True)
     except planner.PlanError as error:
         message = str(error)
         if "Mesiac už obsahuje jazdy" in message:
-            message = existing_text(month_trips(db, vehicle, session.month), session.month)
+            message = existing_text(month_trips(db, vehicle, session.month), session.month, manual=False)
         if "Tachometre tankovaní" in message:
             details = ", ".join(f"{sk_day(day)} {km(odo)}" for day, odo in anchors(db, vehicle, session, state))
-            message = (f"Stavy tachometra na bločkoch ({details}) nesedia s rozsahom {km(state['start_odo'])} – "
+            source = "na bločkoch a v uložených jazdách" if spans else "na bločkoch"
+            message = (f"Stavy tachometra {source} ({details}) nesedia s rozsahom {km(state['start_odo'])} – "
                        f"{km(state['end_odo'])} alebo nejdú chronologicky. Ktorá hodnota je správna?")
         raise Problem(message) from error
-    return anchors(db, vehicle, session, state)
+    return anchors(db, vehicle, session, state), spans
 
 
-def segments_for(session, state, points, vehicle=None):
+def segments_for(session, state, points, vehicle=None, spans=()):
+    """Odometer segments between anchors. A segment covered by a trip kept in the logbook is `fixed`: draft trips
+    never go there and its kilometres are already accounted for."""
     first, last = month_bounds(session)
     if vehicle is not None:
         first = max(first, vehicle.start_date)
     result, prior_day, prior_odo = [], first, state["start_odo"]
     for day, odo in [*points, (last, state["end_odo"])]:
-        result.append(dict(first=prior_day, last=day, start=prior_odo, end=odo, budget=odo - prior_odo, trips=[]))
+        fixed = odo > prior_odo and prior_day == day and any(
+            span_day == day and start <= prior_odo and odo <= end for span_day, start, end in spans)
+        result.append(dict(first=prior_day, last=day, start=prior_odo, end=odo, budget=odo - prior_odo, trips=[], fixed=fixed))
         prior_day, prior_odo = day, odo
     return result
 
@@ -419,7 +470,7 @@ def assign(segments, trips):
     current = 0
     for trip in trips:
         day = date.fromisoformat(trip["day"])
-        options = [i for i, s in enumerate(segments) if i >= current and s["first"] <= day <= s["last"]]
+        options = [i for i, s in enumerate(segments) if i >= current and s["first"] <= day <= s["last"] and not s["fixed"]]
         if not options:
             raise Problem(f"Jazda {trip['id']} ({sk_day(day)}) nenadväzuje chronologicky na tankovania. Skontrolujte jej dátum.")
         index = next((i for i in options if segments[i]["budget"] > 0 and not segments[i]["trips"]),
@@ -432,6 +483,8 @@ def distribute(segments):
     """Exact integer kilometres per segment, keeping confirmed distances and weighting the rest."""
     problems = []
     for segment in segments:
+        if segment["fixed"]:
+            continue
         trips, budget = segment["trips"], segment["budget"]
         span = f"medzi {sk_day(segment['first'])} ({km(segment['start'])}) a {sk_day(segment['last'])} ({km(segment['end'])})"
         if budget > 0 and not trips:
@@ -463,11 +516,15 @@ def distribute(segments):
     return problems
 
 
-def chain(state):
-    odo = state["start_odo"] or 0
-    for trip in state["trips"]:
-        trip["start_odo"], trip["end_odo"] = odo, odo + (trip.get("distance") or 0)
-        odo = trip["end_odo"]
+def chain(state, segments=None):
+    """Odometers of draft trips: within each segment from its start reading (kept trips sit between segments)."""
+    if segments is None:
+        segments = [dict(start=state["start_odo"] or 0, trips=state["trips"])]
+    for segment in segments:
+        odo = segment["start"]
+        for trip in segment["trips"]:
+            trip["start_odo"], trip["end_odo"] = odo, odo + (trip.get("distance") or 0)
+            odo = trip["end_odo"]
 
 
 def sort_trips(state):
@@ -482,13 +539,13 @@ def segment_days(db, vehicle, segments, index):
     return workdays(db, vehicle, min(start, segment["last"]), segment["last"])
 
 
-def fill_gaps(db, vehicle, session, state, points):
+def fill_gaps(db, vehicle, session, state, points, spans=()):
     """Move estimated-date trips into odometer segments left without a trip (e.g. after a user fixed a date)."""
     moves = []
     for _ in range(len(state["trips"])):
-        segments = segments_for(session, state, points, vehicle)
+        segments = segments_for(session, state, points, vehicle, spans)
         assign(segments, state["trips"])
-        empty = [i for i, s in enumerate(segments) if s["budget"] > 0 and not s["trips"]]
+        empty = [i for i, s in enumerate(segments) if s["budget"] > 0 and not s["trips"] and not s["fixed"]]
         donors = [(abs(j - empty[0]), j) for j, s in enumerate(segments) if empty and len(s["trips"]) > 1
                   and any(not t["day_confirmed"] for t in s["trips"])]
         if not empty or not donors:
@@ -501,7 +558,7 @@ def fill_gaps(db, vehicle, session, state, points):
         sort_trips(state)
         moves.append(dict(id=trip["id"], text=f"Jazdu {trip['id']} ({trip['destination']}) som presunul na {sk_day(trip['day'])}, "
                           f"aby tachometer sedel s tankovaním {sk_day(segments[target]['last'])} ({km(segments[target]['end'])})."))
-    return segments_for(session, state, points, vehicle), moves
+    return segments_for(session, state, points, vehicle, spans), moves
 
 
 def recalculate(db, vehicle, session, state):
@@ -510,18 +567,20 @@ def recalculate(db, vehicle, session, state):
     state["moves"] = []
     if not state["trips"]:
         return []
+    placed = None
     try:
-        points = check_month(db, vehicle, session, state)
-        segments, state["moves"] = fill_gaps(db, vehicle, session, state, points)
-        segments = segments_for(session, state, points, vehicle)
+        points, spans = check_month(db, vehicle, session, state)
+        segments, state["moves"] = fill_gaps(db, vehicle, session, state, points, spans)
+        segments = segments_for(session, state, points, vehicle, spans)
         early = [t["id"] for t in state["trips"] if t["day"] < vehicle.start_date.isoformat()]
         if early:
             raise Problem(f"Jazdy {', '.join(early)} sú pred začiatkom evidencie vozidla ({sk_day(vehicle.start_date)}). Opravte ich dátum.")
         assign(segments, state["trips"])
         problems = distribute(segments)
+        placed = segments
     except Problem as problem:
         problems = [str(problem)]
-    chain(state)
+    chain(state, placed)
     for trip in state["trips"]:
         ratio = D(trip["distance"]) / trip["approximate_km"] if trip.get("approximate_km") and trip.get("distance") else D(1)
         trip["warning"] = (f"Vzdialenosť sa líši od odhadu {km(trip['approximate_km'])} o viac ako 30 %."
@@ -536,7 +595,7 @@ def build_trips(db, vehicle, session, state):
     """Initial schedule from the routes Gemini understood: user-stated dates stay, the rest is spread."""
     if not state["routes"]:
         raise Problem("Kde ste počas mesiaca približne jazdili? Napíšte napríklad „trikrát Košice, dvakrát Poprad“.")
-    points = check_month(db, vehicle, session, state)
+    points, spans = check_month(db, vehicle, session, state)
     first, last = month_bounds(session)
     fixed, free, rounds = [], [], max(route["count"] for route in state["routes"])
     for route in state["routes"]:
@@ -555,19 +614,23 @@ def build_trips(db, vehicle, session, state):
                     approximate_km=known_km(db, vehicle, dict(state, routes=[]), route["destination"], route.get("origin") or None)
                     or route.get("approximate_km"),
                     distance=0, day_confirmed=confirmed, km_confirmed=False, order=0)
-    segments = segments_for(session, state, points, vehicle)
+    segments = segments_for(session, state, points, vehicle, spans)
     trips = sorted((make(route, day, True) for route, day in fixed), key=lambda t: t["day"])
     assign(segments, trips)
     counts = [len(s["trips"]) for s in segments]
-    empty = [i for i, s in enumerate(segments) if s["budget"] > 0 and not counts[i]]
+    open_segments = [i for i, s in enumerate(segments) if s["budget"] > 0 and not s["fixed"]]
+    empty = [i for i in open_segments if not counts[i]]
+    if not open_segments:
+        raise Problem("Všetky kilometre mesiaca už pokrývajú jazdy uložené v knihe. Nie je čo navrhnúť.")
     if len(empty) > len(free):
-        raise Problem(f"Tankovania rozdeľujú mesiac na {len([s for s in segments if s['budget'] > 0])} úsekov s jazdou, "
+        source = "Tankovania a uložené jazdy" if spans else "Tankovania"
+        raise Problem(f"{source} rozdeľujú mesiac na {len(open_segments)} úsekov s jazdou, "
                       f"ale opis obsahuje iba {len(fixed) + len(free)} jázd. Kam ste ešte išli?")
     extra = [0] * len(segments)
     for index in empty:
         extra[index] = 1
     for _ in range(len(free) - len(empty)):
-        candidates = [i for i, s in enumerate(segments) if s["budget"] > counts[i] + extra[i]]
+        candidates = [i for i, s in enumerate(segments) if not s["fixed"] and s["budget"] > counts[i] + extra[i]]
         if not candidates:
             raise Problem("Počet jázd je vyšší ako počet najazdených kilometrov. Skontrolujte opis.")
         index = max(candidates, key=lambda i: (D(segments[i]["budget"]) / (counts[i] + extra[i] + 1), -i))
@@ -603,8 +666,6 @@ def apply_operation(db, vehicle, session, state, op):
         raise Problem("Dátum predchádza začiatku evidencie vozidla.")
     if op.action == "set_replace":
         info = month_trips(db, vehicle, session.month)
-        if op.replace and info["manual"]:
-            raise Problem(existing_text(info, session.month))
         state["replace_existing"] = bool(op.replace and info["replaceable"])
         return ["existing"]
     if op.action == "set_odometers":
@@ -736,13 +797,14 @@ def tank_balance(db, vehicle, session, state):
     opening = history[-1]["end_liters"] if history else vehicle.initial_liters
     replaced = set(month_trips(db, vehicle, month)["ids"]) if state.get("replace_existing") else set()
     events = []
+    # rows saved in the logbook get keys "kniha-j<id>" / "kniha-t<id>" so the draft can show them read-only
     for trip in db.scalars(select(Trip).where(Trip.vehicle_id == vehicle.id, Trip.day >= month, Trip.day < stop)):
         if trip.id not in replaced:
-            events.append(((trip.day.isoformat(), trip.end_odo, 0, "", trip.id), "trip", None,
+            events.append(((trip.day.isoformat(), trip.end_odo, 0, "", trip.id), "trip", f"kniha-j{trip.id}",
                            trip.rate * (trip.end_odo - trip.start_odo) / 100))
     for fuel in db.scalars(select(Fuel).where(Fuel.vehicle_id == vehicle.id, Fuel.day >= month, Fuel.day < stop)):
         events.append(((fuel.day.isoformat(), fuel.odo if fuel.odo is not None else 10**12, 1, fuel.clock, fuel.id),
-                       "fuel", None, fuel.liters, fuel.measured))
+                       "fuel", f"kniha-t{fuel.id}", fuel.liters, fuel.measured))
     for index, trip in enumerate(state["trips"]):
         rate = vehicle.city_rate if trip["category"] == "mesto" else vehicle.outside_rate
         events.append(((trip["day"], trip.get("end_odo") or 0, 0, "", index), "trip", trip["id"],
@@ -756,23 +818,23 @@ def tank_balance(db, vehicle, session, state):
     planned = bool(state["trips"])
     for key, kind, row_id, amount, *rest in sorted(events, key=lambda event: event[0]):
         before = level
+        label = f" ({row_id})" if not row_id.startswith("kniha-") else " (v knihe)"
         if kind == "trip":
             level -= amount
             consumed += amount
         else:
             if planned and before < -tolerance:
-                warnings.append(f"Pred tankovaním {sk_day(key[0])}{' (' + row_id + ')' if row_id else ''} by nádrž podľa "
+                warnings.append(f"Pred tankovaním {sk_day(key[0])}{label} by nádrž podľa "
                                 f"normy klesla na {liters(before)}. Chýba skoršie tankovanie alebo sú kilometre privysoké.")
             level += amount
             purchased += amount
             if planned and level > vehicle.capacity + tolerance:
-                warnings.append(f"Tankovanie {sk_day(key[0])}{' (' + row_id + ')' if row_id else ''}: pred tankovaním "
+                warnings.append(f"Tankovanie {sk_day(key[0])}{label}: pred tankovaním "
                                 f"{liters(before)} + {liters(amount)} = {liters(level)}, čo je viac ako nádrž "
                                 f"{liters(vehicle.capacity)}. Skontrolujte litre na bločku alebo doplňte jazdy pred týmto tankovaním.")
             if rest and rest[0] is not None:
                 level = D(rest[0])  # measured tank level after refuel, as in the ledger
-        if row_id:
-            rows[row_id] = dict(before=rounded(before, "0.1"), after=rounded(level, "0.1"))
+        rows[row_id] = dict(before=rounded(before, "0.1"), after=rounded(level, "0.1"))
     if planned and level < -tolerance:
         warnings.append(f"Na konci mesiaca by nádrž podľa normy bola na {liters(level)}. Chýba tankovanie alebo sú kilometre privysoké.")
     return dict(opening=rounded(D(opening), "0.1"), purchased=rounded(purchased, "0.1"), consumed=rounded(consumed, "0.1"),
@@ -790,7 +852,9 @@ def tank_text(db, vehicle, session, state):
 def view(db, vehicle, session, state=None, error=None):
     state = {**blank_state(), **deepcopy(state or session.state)}
     problems = receipt_checks(db, vehicle, session, state) if session.status == "draft" else []
-    total = sum(t.get("distance") or 0 for t in state["trips"])
+    kept, fuels = saved_rows(db, vehicle, session, state) if session.status == "draft" else ([], [])
+    kept_km = sum(t.end_odo - t.start_odo for t in kept)
+    total = sum(t.get("distance") or 0 for t in state["trips"]) + kept_km
     expected = (state["end_odo"] - state["start_odo"]) if state["start_odo"] is not None and state["end_odo"] is not None else None
     can_confirm = session.status == "draft" and not problems and not state["receipts_confirmed"]
     can_plan = session.status == "draft" and state["receipts_confirmed"]
@@ -806,6 +870,11 @@ def view(db, vehicle, session, state=None, error=None):
         problems=state["problems"], stale=state["stale"], messages=state["messages"], highlight=state["highlight"],
         existing={k: v for k, v in month_trips(db, vehicle, session.month).items() if k != "ids"},
         tank=tank_balance(db, vehicle, session, state) if session.status == "draft" else None,
+        saved=dict(km=kept_km, trips=[dict(key=f"kniha-j{t.id}", day=t.day, origin=t.origin, destination=t.destination,
+                                         purpose=t.purpose, category=t.category, distance=t.end_odo - t.start_odo,
+                                         start_odo=t.start_odo, end_odo=t.end_odo, estimated=bool(t.draft_id)) for t in kept],
+                   fuels=[dict(key=f"kniha-t{f.id}", day=f.day, station=f.station, liters=f.liters, gross=f.gross, odo=f.odo,
+                               note=f.note) for f in fuels]),
         replace_existing=state.get("replace_existing", False),
         distance=expected, planned=total, can_confirm=can_confirm, can_plan=can_plan, can_approve=can_approve,
         assistant=dict(configured=gemini.configured(), model=gemini.model_name()),
@@ -843,15 +912,26 @@ def open_session(vehicle_id: int, data: SessionIn, db=Db, user=Member):
         AssistantSession.user_id == user.id, AssistantSession.month == month))
     if not session:
         state = blank_state()
-        say(state, "assistant", "Dobrý deň. Nahrajte bločky z tankovania za tento mesiac a napíšte, aký bol stav "
-            "tachometra na začiatku a na konci mesiaca a kde ste približne jazdili. Napríklad: „Začiatok 12 240 km, "
-            f"koniec 13 280 km, trikrát Košice a dvakrát Poprad.“ Jazdy počítam s východiskom {distances.HOME}; "
-            "ak ste štartovali inde, napíšte mi to.")
-        info = month_trips(db, vehicle, month)
-        if info["count"]:
-            say(state, "assistant", existing_text(info, month))
+        # the opening reading continues the logbook; the closing one is known when the next month already has trips
+        state["start_odo"] = expected_start(db, vehicle, month)
+        following = db.scalar(select(Trip).where(Trip.vehicle_id == vehicle.id, Trip.day >= next_month(month))
+                              .order_by(Trip.day, Trip.end_odo, Trip.id).limit(1))
+        if following:
+            state["end_odo"] = following.start_odo
+        known = f"Začiatok mesiaca podľa knihy jázd je {km(state['start_odo'])}" + (
+            f" a koniec {km(state['end_odo'])}." if state["end_odo"] is not None else ".")
+        say(state, "assistant", f"Dobrý deň. {known} Nahrajte bločky z tankovania za tento mesiac a napíšte, "
+            + ("" if state["end_odo"] is not None else "aký bol stav tachometra na konci mesiaca a ")
+            + "kde ste približne jazdili. Napríklad: „Koniec 13 280 km, trikrát Košice a dvakrát Poprad.“ "
+            f"Jazdy počítam s východiskom {distances.HOME}; ak ste štartovali inde, napíšte mi to.")
         session = AssistantSession(id=str(uuid4()), vehicle_id=vehicle_id, user_id=user.id, month=month,
                                    status="draft", version=1, state=state)
+        loaded = saved_text(db, vehicle, session, state)
+        if loaded:
+            say(state, "assistant", loaded)
+        info = month_trips(db, vehicle, month)
+        if info["replaceable"]:
+            say(state, "assistant", existing_text(info, month, manual=False))
         db.add(session)
         db.commit()
     return view(db, vehicle, session)
@@ -1067,14 +1147,29 @@ def clean_routes(db, vehicle, session, state, routes):
     return result
 
 
+def book_context(db, vehicle, session, state):
+    """Rows already saved in the logbook for the month, read-only for the assistant."""
+    trips, fuels = saved_rows(db, vehicle, session, state)
+    kept_km = sum(t.end_odo - t.start_odo for t in trips)
+    left = state["end_odo"] - state["start_odo"] - kept_km if state["start_odo"] is not None and state["end_odo"] is not None else None
+    return dict(
+        tankovania=[dict(datum=f.day, stanica=f.station, litre=f.liters, suma=f.gross, tachometer=f.odo, zdroj=f.note)
+                    for f in fuels][:60],
+        tankovania_litre_spolu=sum((f.liters for f in fuels), D(0)),
+        jazdy=[dict(datum=t.day, odkial=t.origin, ciel=t.destination, ucel=t.purpose, typ=t.category,
+                    tachometer_od=t.start_odo, tachometer_do=t.end_odo, km=t.end_odo - t.start_odo,
+                    mesacny_odhad=bool(t.draft_id)) for t in trips][:80],
+        km_ulozenych_jazd=kept_km, km_na_navrh=left)
+
+
 def context(db, vehicle, session, state):
     return dict(
         mesiac=session.month.isoformat()[:7], vozidlo=f"{vehicle.registration} · {vehicle.name}",
         tachometer=dict(zaciatok=state["start_odo"], koniec=state["end_odo"],
                         ocakavany_zaciatok_podla_evidencie=expected_start(db, vehicle, session.month)),
         vychodisko=state["origin"],
-        jazdy_uz_ulozene_v_mesiaci=month_trips(db, vehicle, session.month)["count"],
         nahradit_ulozeny_odhad=state.get("replace_existing", False),
+        v_knihe=book_context(db, vehicle, session, state),
         katalog_cielov=[dict(nazov=d.name, odkial=d.origin, km_jedna_cesta=d.distance) for d in catalogue(db, vehicle)][:50],
         trasy=state["routes"],
         blocky=[dict(row=r["id"], poradie=i + 1, datum=r.get("day"), stanica=r.get("station"), litre=r.get("liters"),
@@ -1128,8 +1223,8 @@ def confirm_receipts(session_id: str, db=Db, user=Member):
         problems = refresh(db, vehicle, session, state)
         changed += [t["id"] for t in state["trips"]]
         text += " Harmonogram som prepočítal podľa potvrdených tankovaní." + ("\n" + "\n".join(problems) if problems else "")
-    elif month_trips(db, vehicle, session.month)["count"] and not state.get("replace_existing"):
-        text += " " + existing_text(month_trips(db, vehicle, session.month), session.month)
+    elif month_trips(db, vehicle, session.month)["replaceable"] and not state.get("replace_existing"):
+        text += " " + existing_text(month_trips(db, vehicle, session.month), session.month, manual=False)
     elif state["routes"] and state["start_odo"] is not None and state["end_odo"] is not None:
         text += " Teraz môžete vytvoriť harmonogram jázd."
     else:
@@ -1192,7 +1287,14 @@ def approve(session_id: str, data: ApproveIn, db=Db, user=Member):
     if recalculate(db, vehicle, session, check) or [(t["day"], t["distance"]) for t in check["trips"]] != \
             [(t["day"], t["distance"]) for t in state["trips"]]:
         fail("Harmonogram už nezodpovedá kontrolám. Prepočítajte ho a skontrolujte.", 409)
-    if state["trips"][-1]["end_odo"] != state["end_odo"] or state["trips"][0]["start_odo"] != state["start_odo"]:
+    kept = saved_rows(db, vehicle, session, state)[0]
+    odo = state["start_odo"]
+    for _, start, end in sorted([(t.day.isoformat(), t.start_odo, t.end_odo) for t in kept]
+                                + [(t["day"], t["start_odo"], t["end_odo"]) for t in state["trips"]]):
+        if start != odo:
+            fail("Jazdy nenadväzujú na tachometer. Prepočítajte harmonogram a skontrolujte ho.", 409)
+        odo = end
+    if odo != state["end_odo"]:
         fail("Súčet jázd sa nerovná rozdielu tachometra.", 409)
     for receipt in state["receipts"]:
         same = db.scalar(select(Fuel.id).where(Fuel.vehicle_id == vehicle.id, Fuel.day == date.fromisoformat(receipt["day"]),
@@ -1202,8 +1304,6 @@ def approve(session_id: str, data: ApproveIn, db=Db, user=Member):
     replaced = []
     if state.get("replace_existing"):
         info = month_trips(db, vehicle, session.month)
-        if info["manual"]:
-            fail(existing_text(info, session.month), 409)
         for old in db.scalars(select(Trip).where(Trip.id.in_(info["ids"]))):
             replaced.append(json_value({c.name: getattr(old, c.name) for c in old.__table__.columns}))
             db.delete(old)

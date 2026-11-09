@@ -24,9 +24,10 @@ def fingerprint(db, vehicle):
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
 
-def month_context(db, vehicle, month, start_odo, end_odo, today, extra=(), replaceable=False):
+def month_context(db, vehicle, month, start_odo, end_odo, today, extra=(), replaceable=False, keep_manual=False):
     """Validate the month and return odometer anchors; `extra` holds (day, odo) from unsaved receipts.
-    With `replaceable`, trips of this month saved earlier from a monthly draft are ignored (they get replaced)."""
+    With `replaceable`, trips of this month saved earlier from a monthly draft are ignored (they get replaced).
+    With `keep_manual`, manually entered trips of the month may stay (the caller plans around them)."""
     if month >= month_of(today):
         raise PlanError("Mesačný návrh vytvorte po skončení mesiaca.")
     stop = next_month(month)
@@ -40,7 +41,7 @@ def month_context(db, vehicle, month, start_odo, end_odo, today, extra=(), repla
                            .order_by(Trip.day, Trip.end_odo, Trip.id)))
     if replaceable:
         trips = [trip for trip in trips if not (month <= trip.day < stop and trip.draft_id)]
-    if any(month <= trip.day < stop for trip in trips):
+    if any(month <= trip.day < stop and (trip.draft_id or not keep_manual) for trip in trips):
         raise PlanError("Mesiac už obsahuje jazdy. Návrh je určený pre mesiac bez zapísaných jázd.")
     previous = [trip for trip in trips if trip.day < month]
     following = [trip for trip in trips if trip.day >= stop]

@@ -11,6 +11,9 @@ type Receipt = { id:string; file_id:string|null; file_name:string|null; source:s
   duplicate:string|null; duplicate_ok:boolean; missing:string[]; unreadable:string[] };
 type Trip = { id:string; day:string; origin:string; destination:string; category:string; purpose:string; distance:number;
   start_odo:number; end_odo:number; approximate_km:number|null; day_confirmed:boolean; km_confirmed:boolean; warning:string|null };
+type SavedTrip = { key:string; day:string; origin:string; destination:string; purpose:string; category:string; distance:number;
+  start_odo:number; end_odo:number; estimated:boolean };
+type SavedFuel = { key:string; day:string; station:string; liters:string; gross:string; odo:number|null; note:string };
 type Message = { role:'user'|'assistant'|'error'; text:string; at:string; changed:string[] };
 type Route = { destination:string; count:number; approximate_km:number|null; category:string; days:string[] };
 type Draft = { id:string; status:'draft'|'saved'; version:number; month:string; error:string|null;
@@ -18,11 +21,15 @@ type Draft = { id:string; status:'draft'|'saved'; version:number; month:string; 
   files:FileItem[]; receipts:Receipt[]; receipts_confirmed:boolean; receipt_problems:string[]; trips:Trip[];
   problems:string[]; stale:boolean; messages:Message[]; highlight:string[]; routes:Route[];
   can_confirm:boolean; can_plan:boolean; can_approve:boolean; origin:string; replace_existing:boolean;
-  existing:{count:number; replaceable:number; manual:number; km:number};
+  existing:{count:number; replaceable:number; manual:number; km:number; manual_km:number};
+  saved:{km:number; trips:SavedTrip[]; fuels:SavedFuel[]};
   tank:{opening:string; purchased:string; consumed:string; closing:string; capacity:string; planned:boolean;
     rows:Record<string,{before:string; after:string}>; warnings:string[]}|null;
   assistant:{configured:boolean; model:string}; limits:{file_mb:number; files:number; message:number; types:string[]} };
 type Operation = Record<string, string | number | boolean | string[] | null | undefined> & { action:string };
+
+const plural = (n: number, one: string, few: string, many: string) => n === 1 ? one : n >= 2 && n <= 4 ? few : many;
+const fmtDay = (iso: string) => { const [y, m, d] = iso.slice(0, 10).split('-'); return `${Number(d)}. ${Number(m)}. ${y}`; };
 
 const receiptLabels: Record<string,string> = { day:'dátum', liters:'litre', gross:'suma', currency:'mena', station:'stanica', odo:'tachometer' };
 
@@ -151,6 +158,7 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
   const rowKey = (id: string) => id + (lit.has(id) ? '-' + draft.version : '');
   const locked = saved || Boolean(busy);
   const delta = draft.distance;
+  const bookTrips = saved ? [] : draft.saved.trips;
 
   const previewPanel = <section className="wizard-preview" aria-label="Náhľad mesiaca">
     <Paper variant="outlined" className="panel">
@@ -168,17 +176,20 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
           helperText={draft.end_odo == null ? 'Chýba – napíšte ho asistentovi' : ' '}
           onBlur={event => { if (event.target.value !== String(draft.end_odo ?? '')) void odometer('end_odo', event.target.value); }} />
         <div className="odo-sum"><span>Mesačný rozdiel</span><strong>{delta != null ? fmt(delta, 0) + ' km' : '–'}</strong>
-          {draft.trips.length > 0 && <Chip size="small" variant="outlined" color={delta === draft.planned ? 'success' : 'error'}
+          {(draft.trips.length > 0 || bookTrips.length > 0) && <Chip size="small" variant="outlined" color={delta === draft.planned ? 'success' : 'error'}
             label={'Jazdy spolu ' + fmt(draft.planned, 0) + ' km'} />}</div>
       </div>
-      {draft.existing.count > 0 && !saved && (draft.existing.manual > 0
-        ? <Alert severity="error" sx={{ mt: 1.5 }}>Mesiac už má v evidencii {draft.existing.manual} ručne zapísaných jázd.
-            Sprievodca ich neprepisuje – vyberte mesiac bez jázd alebo ich upravte v Knihe jázd.</Alert>
-        : <Alert severity="warning" sx={{ mt: 1.5 }} className={lit.has('existing') ? 'changed-field' : ''}>
+      {!saved && (draft.saved.fuels.length > 0 || draft.existing.manual > 0) && <Alert severity="info" sx={{ mt: 1.5 }}>
+        Načítané z knihy jázd:
+        {draft.saved.fuels.length > 0 && <> {draft.saved.fuels.length} {plural(draft.saved.fuels.length, 'tankovanie', 'tankovania', 'tankovaní')} ({fmt(draft.saved.fuels.reduce((sum, f) => sum + Number(f.liters), 0), 1)} l)</>}
+        {draft.saved.fuels.length > 0 && draft.existing.manual > 0 && ' a'}
+        {draft.existing.manual > 0 && <> {draft.existing.manual} {plural(draft.existing.manual, 'ručne zapísaná jazda', 'ručne zapísané jazdy', 'ručne zapísaných jázd')} ({fmt(draft.existing.manual_km, 0)} km)</>}.
+        Sú označené „v knihe“, sprievodca ich nemení a návrh dopočíta iba zvyšné kilometre.</Alert>}
+      {draft.existing.replaceable > 0 && !saved && <Alert severity="warning" sx={{ mt: 1.5 }} className={lit.has('existing') ? 'changed-field' : ''}>
             Mesiac už obsahuje {draft.existing.replaceable} jázd ({fmt(draft.existing.km, 0)} km) uložených skôr ako mesačný odhad.
             <div><FormControlLabel control={<Switch checked={draft.replace_existing} disabled={locked}
               onChange={event => void operate([{ action: 'set_replace', replace: event.target.checked }])} />}
-              label="Nahradiť uložený odhad týmto návrhom (staré jazdy sa odstránia až pri schválení)" /></div></Alert>)}
+              label="Nahradiť uložený odhad týmto návrhom (staré jazdy sa odstránia až pri schválení)" /></div></Alert>}
       <p className="muted" style={{ marginTop: 10 }}>Východisko jázd: <b>{draft.origin || 'Žilina'}</b> · vzdialenosti sú orientačné, tam a späť.</p>
       {draft.tank && <div className="tank-strip" aria-label="Stav nádrže">
         <span>Nádrž na začiatku <b>{fmt(draft.tank.opening, 1)} l</b></span>
@@ -210,7 +221,22 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
         <TableHead><TableRow><TableCell>#</TableCell><TableCell>Doklad</TableCell><TableCell>Dátum</TableCell>
           <TableCell>Stanica</TableCell><TableCell>Litre</TableCell><TableCell>Suma s DPH</TableCell><TableCell>Mena</TableCell>
           <TableCell>Tachometer</TableCell><TableCell>Nádrž</TableCell><TableCell>Stav</TableCell><TableCell /></TableRow></TableHead>
-        <TableBody>{draft.receipts.map(receipt => {
+        <TableBody>{!saved && draft.saved.fuels.map(fuel => <TableRow key={fuel.key} className="draft-row book-row">
+          <TableCell><Chip size="small" variant="outlined" label="v knihe" /></TableCell>
+          <TableCell><small className="muted">{fuel.note || 'kniha jázd'}</small></TableCell>
+          <TableCell className="nowrap">{fmtDay(fuel.day)}</TableCell>
+          <TableCell>{fuel.station}</TableCell>
+          <TableCell className="nowrap">{fmt(fuel.liters, 2)}</TableCell>
+          <TableCell className="nowrap">{fmt(fuel.gross, 2)}</TableCell>
+          <TableCell>EUR</TableCell>
+          <TableCell className="nowrap">{fuel.odo != null ? fmt(fuel.odo, 0) : <small className="muted">neuvedený</small>}</TableCell>
+          <TableCell className="nowrap">{draft.tank?.rows[fuel.key] && draft.tank.planned
+            ? <>{fmt(draft.tank.rows[fuel.key].before, 1)} → <b>{fmt(draft.tank.rows[fuel.key].after, 1)} l</b></>
+            : <small className="muted">po harmonograme</small>}</TableCell>
+          <TableCell><small className="muted">uložené, nemení sa</small></TableCell>
+          <TableCell />
+        </TableRow>)}
+        {draft.receipts.map(receipt => {
           const file = draft.files.find(item => item.id === receipt.file_id);
           const flagged = (field: string) => receipt.missing.includes(field) || receipt.unreadable.includes(field);
           return <TableRow key={rowKey(receipt.id)} className={rowClass(receipt.id)}>
@@ -249,7 +275,7 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
                 onClick={() => void operate([{ action: 'delete_receipt', row: receipt.id }])}>✕</IconButton></>}</TableCell>
           </TableRow>;
         })}
-        {!draft.receipts.length && <TableRow><TableCell colSpan={11} className="muted">
+        {!draft.receipts.length && !draft.saved.fuels.length && <TableRow><TableCell colSpan={11} className="muted">
           Zatiaľ žiadne bločky. Nahrajte ich v chate alebo pridajte ručne.</TableCell></TableRow>}</TableBody>
       </Table></TableContainer>
       {draft.receipt_problems.length > 0 && !saved && <Alert severity="warning" sx={{ mt: 1 }}>
@@ -281,10 +307,24 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
         <b>Kontrola nádrže</b><ul className="tight">{draft.tank.warnings.map(item => <li key={item}>{item}</li>)}</ul></Alert>}
       {draft.problems.length > 0 && <Alert severity="error" sx={{ mt: 1 }}>
         <ul className="tight">{draft.problems.map(item => <li key={item}>{item}</li>)}</ul></Alert>}
-      {draft.trips.length > 0 && <TableContainer className="draft-table"><Table size="small">
+      {(draft.trips.length > 0 || bookTrips.length > 0) && <TableContainer className="draft-table"><Table size="small">
         <TableHead><TableRow><TableCell>#</TableCell><TableCell>Dátum</TableCell><TableCell>Cieľ</TableCell><TableCell>Typ</TableCell>
           <TableCell>Km</TableCell><TableCell>Tachometer</TableCell><TableCell>Nádrž po</TableCell><TableCell>Pôvod</TableCell><TableCell /></TableRow></TableHead>
-        <TableBody>{draft.trips.map(trip => <TableRow key={rowKey(trip.id)} className={rowClass(trip.id)}>
+        <TableBody>{[...draft.trips.map(trip => ({ trip, book: undefined as SavedTrip | undefined, day: trip.day, odo: trip.start_odo })),
+          ...bookTrips.map(book => ({ trip: undefined as Trip | undefined, book, day: book.day, odo: book.start_odo }))]
+          .sort((a, b) => a.day.localeCompare(b.day) || a.odo - b.odo).map(({ trip, book }) => book
+          ? <TableRow key={book.key} className="draft-row book-row">
+            <TableCell><Chip size="small" variant="outlined" label="v knihe" /></TableCell>
+            <TableCell className="nowrap">{fmtDay(book.day)}</TableCell>
+            <TableCell>{book.destination}{book.purpose && <small className="muted block">{book.purpose}</small>}</TableCell>
+            <TableCell>{book.category === 'mesto' ? 'mesto' : 'mimo mesta'}</TableCell>
+            <TableCell>{fmt(book.distance, 0)}</TableCell>
+            <TableCell className="nowrap">{fmt(book.start_odo, 0)} → {fmt(book.end_odo, 0)}</TableCell>
+            <TableCell className="nowrap">{draft.tank?.rows[book.key] ? fmt(draft.tank.rows[book.key].after, 1) + ' l' : '–'}</TableCell>
+            <TableCell><small className="muted">{book.estimated ? 'uložený odhad' : 'zapísaná ručne'}, nemení sa</small></TableCell>
+            <TableCell />
+          </TableRow>
+          : trip && <TableRow key={rowKey(trip.id)} className={rowClass(trip.id)}>
           <TableCell><b>{trip.id}</b></TableCell>
           <TableCell><Cell label={'Dátum ' + trip.id} type="date" width={130} value={trip.day} disabled={locked}
             onSave={value => void tripEdit(trip, 'day', value)} /></TableCell>
@@ -324,7 +364,7 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
         <p>Do evidencie sa nič nezapíše, kým výkaz neschválite. Jazdy a tankovania sa uložia naraz v jednej transakcii.</p>
         <div className="actions" style={{ marginTop: 12 }}>
           <Button size="large" variant="contained" color="success" disabled={!draft.can_approve || locked}
-            onClick={() => setConfirm({ text: `Uložiť ${draft.trips.length} jázd (${fmt(draft.planned, 0)} km) a ${draft.receipts.length} tankovaní do knihy jázd?${draft.replace_existing ? ` Nahradí sa ${draft.existing.replaceable} skôr uložených odhadovaných jázd.` : ''} Odhadované jazdy zostanú vo výkaze označené.`, run: approve })}>
+            onClick={() => setConfirm({ text: `Uložiť ${draft.trips.length} jázd (${fmt(draft.planned - draft.saved.km, 0)} km) a ${draft.receipts.length} tankovaní do knihy jázd?${draft.saved.km ? ' Jazdy a tankovania, ktoré už sú v knihe, zostanú bez zmeny.' : ''}${draft.replace_existing ? ` Nahradí sa ${draft.existing.replaceable} skôr uložených odhadovaných jázd.` : ''} Odhadované jazdy zostanú vo výkaze označené.`, run: approve })}>
             Schváliť a uložiť výkaz</Button>
           <Button color="error" disabled={locked} onClick={() => setConfirm({ text: 'Zahodiť celý koncept vrátane chatu a nahraných bločkov?', run: discard })}>Zahodiť koncept</Button>
         </div></>}
