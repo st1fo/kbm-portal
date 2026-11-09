@@ -488,6 +488,31 @@ class AssistantFlowTests(unittest.TestCase):
         self.assertEqual(sum(t["distance"] for t in draft["trips"]), 6200 - 5480)
         self.assertEqual(draft["problems"], [])
 
+    def test_trips_are_planned_around_refuels(self):
+        """Refuels without an odometer (FleetCor) still steer the schedule: the tank never goes below zero before a
+        refuel and every refuel fits; when the fuel cannot cover the month, only the end is short and it is explained."""
+        vehicle = self.ok(self.admin.post("/api/vehicles", json={
+            "name": "Nádrž", "registration": "TEST-TANK", "start_date": self.day(1), "initial_odo": 10000,
+            "capacity": 60, "initial_liters": 30, "city_rate": 6, "outside_rate": 6}))
+        with Session() as db:
+            for number in (10, 20):
+                db.add(Fuel(vehicle_id=vehicle["id"], day=date.fromisoformat(self.day(number)), odo=None, liters=D("45"),
+                            gross=D("70"), vat=D("23"), station="Shell", clock="", note="FleetCor 1, poukážka 1"))
+            db.commit()
+        routes = [{"destination": "Martin", "count": 4, "approximate_km": 120, "category": "mimo mesto", "days": []},
+                  {"destination": "Košice", "count": 2, "approximate_km": 480, "category": "mimo mesto", "days": []}]
+        for end, short in ((11800, False), (12400, True)):  # 120 l of fuel lasts 2 000 km at 6 l/100 km
+            sid = self.ok(self.admin.post(f"/api/vehicles/{vehicle['id']}/assistant", json={"month": self.month.isoformat()}))["id"]
+            draft = self.chat(sid, "Koniec a ciele", end_odo=end, routes=routes)
+            self.assertEqual(sum(t["distance"] for t in draft["trips"]), end - 10000)
+            self.assertEqual(draft["problems"], [])
+            warnings = draft["tank"]["warnings"]
+            self.assertFalse([w for w in warnings if w.startswith("Pred tankovaním") or "viac ako nádrž" in w], warnings)
+            levels = [D(v) for day, v in draft["tank"]["days"].items() if day < self.day(20)]
+            self.assertTrue(all(level >= -2 for level in levels), draft["tank"]["days"])
+            self.assertEqual(any("Palivo na celý mesiac nestačí" in w for w in warnings), short, warnings)
+            self.ok(self.admin.delete(f"/api/assistant/{sid}"))
+
     def test_overloaded_model_falls_back_once(self):
         calls = []
 
