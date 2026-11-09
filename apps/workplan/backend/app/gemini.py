@@ -9,7 +9,7 @@ import os
 from pydantic import BaseModel, Field, ValidationError
 
 log = logging.getLogger('workplan.gemini')
-DEFAULT_MODEL = 'gemini-3.1-flash-lite'
+DEFAULT_MODEL = 'gemini-3.6-flash'
 TIMEOUT_MS = 45_000
 
 
@@ -68,13 +68,18 @@ def _client():
 client_factory = _client   # testy ho nahradia
 
 
-def _config():
+def fallback_model() -> str:
+    """Ľahší model na druhý pokus, keď je hlavný preťažený (503/429)."""
+    return os.getenv('GEMINI_FALLBACK_MODEL', '').strip() or 'gemini-3.1-flash-lite'
+
+
+def _config(model: str):
     from google.genai import types
     options = dict(system_instruction=PROMPT, response_mime_type='application/json', response_schema=Proposal,
                    temperature=0, max_output_tokens=4096)
-    if model_name().startswith('gemini-2.5'):
+    if model.startswith('gemini-2.5'):
         options['thinking_config'] = types.ThinkingConfig(thinking_budget=0)
-    elif model_name().startswith('gemini-3'):
+    elif model.startswith('gemini-3'):
         options['thinking_config'] = types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL)
     return types.GenerateContentConfig(**options)
 
@@ -99,14 +104,16 @@ def propose(context: dict, history: list[dict], message: str) -> Proposal:
         types.Part.from_text(text='Správa používateľa:\n' + message)]))
     client = client_factory()   # referenciu držíme, inak SDK klienta zavrie skôr, ako odošle požiadavku
     last = None
+    model = model_name()
     for attempt in (1, 2):      # jedno opakovanie pri výpadku spojenia alebo neplatnej odpovedi
         try:
-            r = client.models.generate_content(model=model_name(), contents=contents, config=_config())
+            r = client.models.generate_content(model=model, contents=contents, config=_config(model))
         except Exception as error:
             log.warning('Gemini zlyhalo (pokus %s): %r', attempt, error)
             last = AIError(_describe(error))
             code = getattr(error, 'code', None) or getattr(error, 'status_code', None)
-            if code and 400 <= int(code) < 500: break
+            if code and 400 <= int(code) < 500 and int(code) != 429: break
+            if code and int(code) in (429, 500, 503, 504): model = fallback_model()  # preťažený model → ľahší
             continue
         if not getattr(r, 'text', None):
             log.warning('Gemini vrátil prázdnu odpoveď (pokus %s)', attempt)

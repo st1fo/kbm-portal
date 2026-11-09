@@ -1192,9 +1192,26 @@ def message(session_id: str, data: MessageIn, db=Db, user=Member):
                 answer.append(f"Zmenu {proposal.row or ''} som neurobil: {problem_text(error)}")
         # The chat only creates the first schedule; it never silently replaces one the user has edited
         # (a fresh schedule is the explicit "Navrhnúť znova" button). Existing rows are re-checked below.
+        if result.create_plan and result.routes and state["trips"] and "routes" in changed:
+            state["trips"] = []  # the user explicitly asked for a new plan from a new description
+        if result.create_plan and not state["routes"] and not state["trips"]:
+            state["routes"] = routes_from_history(db, vehicle, session, state)
+            if state["routes"]:
+                changed.append("routes")
+                answer = [a for a in answer if a != (result.reply or "").strip()]  # its text named destinations it did not return
+                answer.append("Ciele som vybral z častých jázd tohto vozidla: " + ", ".join(
+                    f"{r['destination']} {r['count']}×" for r in state["routes"]) + ". Ide o odhad, môžete ho upraviť.")
         planned, plan_text = auto_plan(db, vehicle, session, state)
         changed += planned
         answer.append(plan_text)
+        if result.create_plan and not state["trips"] and not plan_text:
+            missing = []
+            if state["start_odo"] is None or state["end_odo"] is None:
+                missing.append("stav tachometra na začiatku a na konci mesiaca")
+            if not state["routes"]:
+                missing.append("aspoň približne kam ste jazdili (alebo napíšte „navrhni ciele sám“)")
+            if missing:
+                answer.append("Návrh jázd zatiaľ nie je vytvorený. Potrebujem ešte: " + " a ".join(missing) + ".")
         problems = refresh(db, vehicle, session, state)
         answer += [move["text"] for move in state["moves"]]
         changed += [move["id"] for move in state["moves"]]
@@ -1260,6 +1277,37 @@ def book_context(db, vehicle, session, state):
         km_ulozenych_jazd=kept_km, km_na_navrh=left)
 
 
+def destination_history(db, vehicle, month):
+    """Most frequent destinations of this vehicle in the six months before, so the assistant can invent a plausible month."""
+    since = month_of(month - timedelta(days=183))
+    rows = db.execute(select(Trip.destination, Trip.origin, Trip.category, func.count(), func.avg(Trip.end_odo - Trip.start_odo))
+                      .where(Trip.vehicle_id == vehicle.id, Trip.day >= since, Trip.day < month, Trip.destination != "")
+                      .group_by(Trip.destination, Trip.origin, Trip.category).order_by(func.count().desc()).limit(15)).all()
+    return [dict(ciel=d, odkial=o, typ=c, pocet_jazd=n, km_priemer=round(float(k or 0))) for d, o, c, n, k in rows]
+
+
+def routes_from_history(db, vehicle, session, state):
+    """Deterministic month description when the user asks to invent trips and the model returned none: the vehicle's
+    frequent destinations (else its catalogue), repeated until they roughly cover the kilometres left to plan."""
+    left = book_context(db, vehicle, session, state)["km_na_navrh"]
+    if not left or left <= 0:
+        return []
+    options = [(h["ciel"], h["odkial"], h["typ"], h["km_priemer"]) for h in destination_history(db, vehicle, session.month)
+               if h["km_priemer"] > 0][:8]
+    if not options:
+        options = [(d.name, d.origin, "mesto" if distances.is_city(d.name) else "mimo mesto", d.distance * 2)
+                   for d in catalogue(db, vehicle) if d.distance][:8]
+    if not options:
+        return []
+    counts, total, index = [0] * len(options), 0, 0
+    while total < left * 0.9 and sum(counts) < 40:
+        counts[index % len(options)] += 1
+        total += options[index % len(options)][3]
+        index += 1
+    return [dict(destination=name[:150], origin=(origin or "")[:150], count=count, approximate_km=km, category=category,
+                 purpose="", days=[]) for (name, origin, category, km), count in zip(options, counts) if count]
+
+
 def context(db, vehicle, session, state):
     return dict(
         mesiac=session.month.isoformat()[:7], vozidlo=f"{vehicle.registration} · {vehicle.name}",
@@ -1270,6 +1318,7 @@ def context(db, vehicle, session, state):
         vychodisko=state["origin"],
         nahradit_ulozeny_odhad=state.get("replace_existing", False),
         v_knihe=book_context(db, vehicle, session, state),
+        historia_cielov=destination_history(db, vehicle, session.month),
         katalog_cielov=[dict(nazov=d.name, odkial=d.origin, km_jedna_cesta=d.distance) for d in catalogue(db, vehicle)][:50],
         trasy=state["routes"],
         blocky=[dict(row=r["id"], poradie=i + 1, datum=r.get("day"), stanica=r.get("station"), litre=r.get("liters"),

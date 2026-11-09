@@ -62,7 +62,7 @@ services:
       TZ: Europe/Bratislava
       # Gemini navrhuje aktivity v Denníku (AI doplnenie dňa); kľúč nejde do prehliadača.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-flash-lite}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
     depends_on:
       workplan-db:
         condition: service_healthy
@@ -83,7 +83,7 @@ services:
       TZ: Europe/Bratislava
       # Gemini key: only logbook-api and workplan-api receive it; it never reaches the browser.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-flash-lite}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
     depends_on:
       logbook-db:
         condition: service_healthy

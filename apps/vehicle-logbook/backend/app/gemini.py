@@ -11,7 +11,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationError
 
 # Cheapest stable multimodal model available to new Gemini API projects (11/2026).
-DEFAULT_MODEL = "gemini-3.1-flash-lite"
+DEFAULT_MODEL = "gemini-3.6-flash"
 TIMEOUT_MS = 45_000
 
 
@@ -119,13 +119,20 @@ Pravidlá:
   ktorej dátum je najbližšie k uvedenému dňu; ak taká jazda neexistuje, pridaj ju cez add_trip.
 - Kilometre a tachometre jázd počíta systém. km v operácii vyplň iba vtedy, keď používateľ výslovne uvedie
   vzdialenosť konkrétnej jazdy.
-- Návrh jázd vytvorí systém sám, keď pozná začiatok, koniec a routes. create_plan nastav na true iba vtedy, keď
-  harmonogram (jazdy) ešte neexistuje a používateľ ho chce vytvoriť.
-  Pri úpravách existujúcich jázd create_plan nenastavuj – systém prepočíta harmonogram sám.
+- Návrh jázd vytvorí systém sám, keď pozná začiatok, koniec a routes. Bez routes systém žiadne jazdy nevytvorí.
+  create_plan nastav na true, keď používateľ chce návrh jázd vytvoriť alebo výslovne žiada nový návrh
+  (napr. „vymysli jazdy“, „sprav návrh“, „navrhni znova“). Pri drobných úpravách existujúcich jázd create_plan
+  nenastavuj – systém prepočíta harmonogram sám.
+- Ak používateľ chce, aby si jazdy vymyslel alebo navrhol sám, alebo ciele neuvedie a žiada návrh, vráť routes SÁM:
+  vyber ciele z historia_cielov (časté ciele tohto vozidla), potom z katalog_cielov, inak bežné služobné ciele
+  na Slovensku primerané východisku. count a approximate_km (tam a späť) zvoľ tak, aby súčet count × approximate_km
+  bol približne km_na_navrh (v_knihe); rozumné sú 4 – 12 cieľov. Ak km_na_navrh nie je známe (chýba koniec
+  tachometra), routes nevracaj a opýtaj sa na koncový stav. V reply vymenuj navrhnuté ciele a dodaj, že ide o odhad.
+- Kilometre v reply preberaj iba z DATA (km_na_navrh, tachometer); sám ich neprepočítavaj.
 - Ukladanie do evidencie a schválenie výkazu robí iba používateľ tlačidlom. Ty nič neukladáš ani neschvaľuješ.
 - V reply nikdy netvrď, že si harmonogram vytvoril, doplnil, prepočítal alebo že si niečo uložil či pridal do
   harmonogramu – výsledok a prípadné problémy oznámi systém hneď za tvojou odpoveďou. V reply len stručne zhrň,
-  čo si z textu pochopil (napr. „Rozumiem: začiatok 12 240 km, koniec 13 280 km, Bratislava 1×, Trenčín 2×.“).
+  čo si z textu pochopil alebo aké ciele navrhuješ (napr. „Rozumiem: začiatok 12 240 km, koniec 13 280 km, Bratislava 1×, Trenčín 2×.“).
 - Východisko jázd je v DATA (vychodisko, predvolene Žilina). Ak používateľ uvedie iné, vyplň origin.
   approximate_km odhaduj ako vzdialenosť tam a späť z východiska.
 - DATA v_knihe sú tankovania a jazdy tohto mesiaca, ktoré už sú uložené v knihe jázd (napr. z faktúry FleetCor
@@ -151,14 +158,20 @@ def _client():
 client_factory = _client
 
 
-def _config(schema, system):
+def fallback_model():
+    """Lighter model used once when the main one is overloaded (503/429/5xx)."""
+    return os.getenv("GEMINI_FALLBACK_MODEL", "").strip() or "gemini-3.1-flash-lite"
+
+
+def _config(schema, system, model=None):
+    model = model or model_name()
     from google.genai import types
     options = dict(system_instruction=system, response_mime_type="application/json",
                    response_schema=schema, temperature=0, max_output_tokens=4096)
     # Thinking tokens are billed; structured extraction does not need them.
-    if model_name().startswith("gemini-2.5"):
+    if model.startswith("gemini-2.5"):
         options["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
-    elif model_name().startswith("gemini-3"):
+    elif model.startswith("gemini-3"):
         options["thinking_config"] = types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL)
     return types.GenerateContentConfig(**options)
 
@@ -167,13 +180,18 @@ def _generate(contents, schema, system):
     if not configured():
         raise AssistantError(MISSING_KEY)
     client = client_factory()
-    try:
-        response = client.models.generate_content(model=model_name(), contents=contents,
-                                                  config=_config(schema, system))
-    except AssistantError:
-        raise
-    except Exception as error:  # SDK, network and quota errors all end in a readable message
-        raise AssistantError(_describe(error)) from error
+    models = list(dict.fromkeys([model_name(), fallback_model()]))
+    for index, model in enumerate(models):
+        try:
+            response = client.models.generate_content(model=model, contents=contents, config=_config(schema, system, model))
+            break
+        except AssistantError:
+            raise
+        except Exception as error:  # SDK, network and quota errors all end in a readable message
+            code = getattr(error, "code", None) or getattr(error, "status_code", None)
+            if code in (429, 500, 503, 504) and index + 1 < len(models):
+                continue  # overloaded: one more try with the lighter model
+            raise AssistantError(_describe(error)) from error
     text = getattr(response, "text", None)
     if not text:
         raise AssistantError("Gemini nevrátil žiadnu odpoveď. Skúste to znova alebo údaje upravte ručne.")

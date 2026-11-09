@@ -434,6 +434,10 @@ class AssistantFlowTests(unittest.TestCase):
         sid = self.ok(self.admin.post(f"/api/vehicles/{vehicle['id']}/assistant", json={"month": self.month.isoformat()}))["id"]
         last = (self.month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
         read = min(last + timedelta(days=3), date.today())
+        # "Vymysli jazdy" without the closing reading: nothing is planned and the user is told what is missing.
+        draft = self.chat(sid, "Vymysli mi jazdy na tento mesiac.", create_plan=True)
+        self.assertEqual(draft["trips"], [])
+        self.assertIn("Návrh jázd zatiaľ nie je vytvorený", draft["messages"][-1]["text"])
         draft = self.chat(sid, f"Koniec 6 000 km, odčítané {read}. Trikrát Martin.", end_odo=6000, end_day=read.isoformat(),
                           routes=[{"destination": "Martin", "count": 3, "category": "mimo mesto", "days": []}])
         weekdays = lambda a, b: sum(1 for i in range((b - a).days + 1) if (a + timedelta(days=i)).weekday() < 5)
@@ -464,6 +468,43 @@ class AssistantFlowTests(unittest.TestCase):
         with Session() as db:
             trips = list(db.scalars(select(Trip).where(Trip.vehicle_id == vehicle["id"])))
         self.assertEqual(max(t.end_odo for t in trips), 6000)
+
+    def test_invent_trips_from_history(self):
+        """„Vymysli jazdy“: when the model returns no destinations, the vehicle's frequent ones are used."""
+        from datetime import timedelta
+        previous = (self.month - timedelta(days=1)).replace(day=1)
+        vehicle = self.ok(self.admin.post("/api/vehicles", json={
+            "name": "História", "registration": "TEST-HIST", "start_date": previous.isoformat(), "initial_odo": 5000,
+            "capacity": 60, "initial_liters": 30, "city_rate": 7, "outside_rate": 6}))
+        with Session() as db:
+            for number, start, end, place in ((3, 5000, 5100, "Martin"), (10, 5100, 5200, "Martin"), (17, 5200, 5480, "Košice")):
+                db.add(Trip(vehicle_id=vehicle["id"], day=previous.replace(day=number), start_odo=start, end_odo=end,
+                            origin="Žilina", destination=place, purpose="", category="mimo mesto", note="", rate=D("6")))
+            db.commit()
+        sid = self.ok(self.admin.post(f"/api/vehicles/{vehicle['id']}/assistant", json={"month": self.month.isoformat()}))["id"]
+        draft = self.chat(sid, "Koniec 6 200, vymysli mi jazdy.", "Navrhujem jazdy.", end_odo=6200, create_plan=True)
+        self.assertIn("Ciele som vybral z častých jázd", draft["messages"][-1]["text"])
+        self.assertEqual({r["destination"] for r in draft["routes"]}, {"Martin", "Košice"})
+        self.assertEqual(sum(t["distance"] for t in draft["trips"]), 6200 - 5480)
+        self.assertEqual(draft["problems"], [])
+
+    def test_overloaded_model_falls_back_once(self):
+        calls = []
+
+        class Busy:
+            def generate_content(self, model, contents, config):
+                calls.append(model)
+                if len(calls) == 1:
+                    raise ApiError(503)
+                return SimpleNamespace(text=json.dumps({"reply": "OK", "operations": [], "create_plan": False}))
+        original = gemini.client_factory
+        gemini.client_factory = lambda: SimpleNamespace(models=Busy())
+        try:
+            result = gemini.interpret({}, [], "ahoj")
+        finally:
+            gemini.client_factory = original
+        self.assertEqual(result.reply, "OK")
+        self.assertEqual(calls, [gemini.model_name(), gemini.fallback_model()])
 
     def test_current_month_and_cross_site_writes_rejected(self):
         today = date.today().replace(day=1)

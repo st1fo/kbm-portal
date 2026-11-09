@@ -87,7 +87,7 @@ Konfigurácia v `.env`, ktorú dostane iba služba `logbook-api`:
 
 ```
 GEMINI_API_KEY=...                    # bez kľúča sprievodca funguje s ručným zadávaním
-GEMINI_MODEL=gemini-3.1-flash-lite    # voliteľné; predvolený je lacný multimodálny model
+GEMINI_MODEL=gemini-3.6-flash         # voliteľné; predvolený model Flash (lacnejší a rýchlejší: gemini-3.1-flash-lite)
 ```
 
 Jeden bloček stojí približne 1 500 vstupných tokenov. Koncept má limit 150 volaní Gemini.
