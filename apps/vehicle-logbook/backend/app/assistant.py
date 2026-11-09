@@ -479,59 +479,101 @@ def planning_rate(vehicle, state):
     return sum((w * D(vehicle.city_rate if c == "mesto" else vehicle.outside_rate) for w, c in weights), D(0)) / total
 
 
-def fuel_points(db, vehicle, session, state, points, trips):
-    """Planning anchors for refuels without an odometer reading (FleetCor invoices, most receipts).
-
-    The ledger adds such a refuel after the day's trips. Without an anchor the schedule could put most kilometres
-    before the first refuel and the tank would run dry (or a refuel would not fit). For each one we pick the odometer
-    at the refuel so that, by the norm, the tank before it sits at a low but non-negative level that leaves room for
-    the refuel; the kilometres between anchors are then split exactly as for real readings. At most `trips` segments
-    with kilometres are created, because every such segment needs a trip."""
+def soft_refuels(db, vehicle, session, state):
+    """Refuels without an odometer reading (FleetCor invoices, most receipts) as (day, liters, measured), by day."""
     first, last = month_bounds(session)
-    close_day, close_odo = date.fromisoformat(state["closing"][0]), state["closing"][1]
-    rate = planning_rate(vehicle, state)
-    capacity = D(vehicle.capacity)
-    state["soft_points"] = []
-    if rate <= 0 or close_odo is None:
-        return points
-    refuels = [(f.day, f.odo, D(f.liters), f.measured) for f in db.scalars(select(Fuel).where(
-        Fuel.vehicle_id == vehicle.id, Fuel.day >= first, Fuel.day <= last))]
-    refuels += [(date.fromisoformat(r["day"]), r.get("odo"), D(r["liters"]), None) for r in state["receipts"]
-                if r.get("day") and r.get("liters")]
-    items = [(day, odo, 0, None, None) for day, odo in [*points, (close_day, close_odo)]]
-    items += [(day, odo if odo is not None else 10**12, 1, liters, measured) for day, odo, liters, measured in refuels]
-    items.sort(key=lambda item: (item[0], item[1], item[2]))
-    odo, level, implied = state["start_odo"], tank_opening(db, vehicle, session.month), []
-    # When the fuel cannot cover the month anyway, refuel at an empty tank so the shortfall does not pile up at the end.
-    short = level + sum((liters for _, _, liters, _ in refuels), D(0)) < D(close_odo - odo) * rate / 100
-    reserve = D(0) if short else capacity * D("0.15")
-    for index, (day, reading, kind, liters, measured) in enumerate(items):
-        if reading < 10**12:  # a known reading (anchor, or a refuel with odometer)
-            level -= D(max(0, reading - odo)) * rate / 100
-            odo = max(odo, reading)
-        if kind == 1:
-            known = [item[1] for item in items[index + 1:] if item[1] < 10**12]
-            same_day_later = any(item[0] == day and item[1] < 10**12 for item in items[index + 1:])
-            if reading == 10**12 and known and not same_day_later and vehicle.start_date <= day <= close_day:
-                target = max(D(0), min(capacity - liters, reserve))
-                distance = int(max(D(0), min((level - target) * 100 / rate, D(min(known) - odo))))
-                if 0 < distance < min(known) - odo:  # an anchor at the next reading itself would add nothing
-                    implied.append((day, odo + distance, distance))
-                    odo += distance
-                    level -= D(distance) * rate / 100
-            level = D(measured) if measured is not None else level + liters
-    result = sorted(set(points) | {(day, reading) for day, reading, _ in implied})
+    rows = [(f.day, D(f.liters), f.measured) for f in db.scalars(select(Fuel).where(
+        Fuel.vehicle_id == vehicle.id, Fuel.day >= first, Fuel.day <= last, Fuel.odo.is_(None)))]
+    rows += [(date.fromisoformat(r["day"]), D(r["liters"]), None) for r in state["receipts"]
+             if r.get("day") and r.get("liters") and r.get("odo") is None]
+    return sorted(rows, key=lambda row: row[0])
 
-    def open_segments(candidate):
-        return sum(1 for s in segments_for(session, state, candidate, vehicle, kept_spans(db, vehicle, session, state))
-                   if s["budget"] > 0 and not s["fixed"])
-    while implied and open_segments(result) > max(trips, 1):
-        smallest = min(implied, key=lambda item: item[2])  # fewer trips than segments: drop the least important anchor
-        implied.remove(smallest)
-        result = sorted(set(points) | {(day, reading) for day, reading, _ in implied})
-    # the ledger puts trips of a refuel day before an odometer-less refuel: such trips belong to the segment before it
-    state["soft_points"] = [[day.isoformat(), reading] for day, reading, _ in implied]
-    return result
+
+def hard_refuels(db, vehicle, session, state):
+    """Refuels with an odometer reading as (day, odo, liters, measured)."""
+    first, last = month_bounds(session)
+    rows = [(f.day, f.odo, D(f.liters), f.measured) for f in db.scalars(select(Fuel).where(
+        Fuel.vehicle_id == vehicle.id, Fuel.day >= first, Fuel.day <= last, Fuel.odo.is_not(None)))]
+    rows += [(date.fromisoformat(r["day"]), r["odo"], D(r["liters"]), None) for r in state["receipts"]
+             if r.get("day") and r.get("liters") and r.get("odo") is not None]
+    return rows
+
+
+def best_subset(amounts, low, high, target):
+    """Indexes of `amounts` whose sum lies in [low, high], as close to `target` as possible (subset sum in 0.1 l).
+    If no subset fits, the closest one, preferring to stay below `high` (a dry tank is worse than a too full one)."""
+    unit = lambda value: int((D(value) * 10).to_integral_value())
+    low, high, target = unit(low), unit(high), unit(target)
+    limit = high + max([unit(a) for a in amounts] or [0])
+    sums = {0: ()}
+    for index, amount in enumerate(amounts):
+        step = unit(amount)
+        for total, picked in list(sums.items()):
+            if total + step <= limit and total + step not in sums:
+                sums[total + step] = picked + (index,)
+    inside = [total for total in sums if low <= total <= high]
+    if inside:
+        return list(sums[min(inside, key=lambda total: (abs(total - target), total))])
+    return list(sums[min(sums, key=lambda total: (max(low - total, total - high), total > high))])
+
+
+def spread(trips, days):
+    """Give trips distinct, evenly spread days (keeps their order)."""
+    for position, trip in enumerate(trips):
+        trip["day"] = days[min(len(days) - 1, ((position + 1) * len(days) - 1) // len(trips))].isoformat()
+
+
+def schedule_for_fuel(db, vehicle, session, state, segments):
+    """Choose the days of estimated-date trips so that, by the norm, the tank never runs dry before a refuel and
+    every refuel fits into the tank. Kilometres per trip stay as planned (they follow the destinations); only the
+    order around refuels without an odometer changes. Returns the ids of trips whose day changed."""
+    capacity = D(vehicle.capacity)
+    rate = lambda trip: D(vehicle.city_rate if trip["category"] == "mesto" else vehicle.outside_rate)
+    use = lambda trip: D(trip.get("distance") or 0) * rate(trip) / 100
+    level = tank_opening(db, vehicle, session.month)
+    refuels, hard = soft_refuels(db, vehicle, session, state), hard_refuels(db, vehicle, session, state)
+    need = sum((use(t) for t in state["trips"]), D(0)) + sum(
+        (D(s["budget"]) * D(vehicle.outside_rate) / 100 for s in segments if s["fixed"]), D(0))
+    short = level + sum((r[1] for r in refuels), D(0)) + sum((h[2] for h in hard), D(0)) < need
+    reserve = D(0) if short else capacity * D("0.15")
+    before = {t["id"]: t["day"] for t in state["trips"]}
+    used_soft, used_hard = set(), set()
+    for index, segment in enumerate(segments):
+        for number, (day, odo, liters, measured) in enumerate(hard):
+            if number not in used_hard and day == segment["first"] and odo == segment["start"]:
+                used_hard.add(number)
+                level = D(measured) if measured is not None else level + liters
+        if segment["fixed"]:
+            level -= D(segment["budget"]) * D(vehicle.outside_rate) / 100
+            continue
+        start = segment["first"] + timedelta(days=1) if index else segment["first"]
+        dated = [t for t in segment["trips"] if t["day_confirmed"]]
+        pool = [t for t in segment["trips"] if not t["day_confirmed"]]
+        previous = start - timedelta(days=1)
+        for number, (day, liters, measured) in enumerate(refuels):
+            if number in used_soft or not start <= day <= segment["last"]:
+                continue
+            used_soft.add(number)
+            available = level - sum((use(t) for t in dated if previous.isoformat() < t["day"] <= day.isoformat()), D(0))
+            # a slightly too full tank (within the ledger's tolerance) is fine, a dry one is not
+            low = max(D(0), available + liters - capacity - max(D(1), capacity * D("0.03")))
+            high = max(D(0), available)
+            chosen = []
+            if pool and day > previous:
+                picked = best_subset([use(t) for t in pool], low, high, min(high, max(low, available - reserve)))
+                chosen = [pool[i] for i in picked]
+                if chosen:
+                    spread(chosen, workdays(db, vehicle, previous + timedelta(days=1), day))
+            pool = [t for t in pool if t not in chosen]
+            level = available - sum((use(t) for t in chosen), D(0))
+            level = D(measured) if measured is not None else level + liters
+            previous = day
+        if pool:
+            first_day = min(previous + timedelta(days=1), segment["last"])
+            spread(pool, workdays(db, vehicle, first_day, segment["last"]))
+        level -= sum((use(t) for t in pool), D(0)) + sum((use(t) for t in dated if t["day"] > previous.isoformat()), D(0))
+    sort_trips(state)
+    return [t["id"] for t in state["trips"] if before.get(t["id"]) != t["day"]]
 
 
 def check_month(db, vehicle, session, state):
@@ -575,9 +617,7 @@ def segments_for(session, state, points, vehicle=None, spans=()):
     for day, odo in [*points, (date.fromisoformat(close[0]), close[1])]:
         fixed = odo > prior_odo and prior_day == day and any(
             span_day == day and start <= prior_odo and odo <= end for span_day, start, end in spans)
-        soft = [prior_day.isoformat(), prior_odo] in state.get("soft_points", [])
-        result.append(dict(first=prior_day, last=day, start=prior_odo, end=odo, budget=odo - prior_odo, trips=[], fixed=fixed,
-                           after_refuel=soft))
+        result.append(dict(first=prior_day, last=day, start=prior_odo, end=odo, budget=odo - prior_odo, trips=[], fixed=fixed))
         prior_day, prior_odo = day, odo
     return result
 
@@ -593,8 +633,7 @@ def assign(segments, trips):
     current = 0
     for trip in trips:
         day = date.fromisoformat(trip["day"])
-        options = [i for i, s in enumerate(segments) if i >= current and s["first"] <= day <= s["last"] and not s["fixed"]
-                   and not (s["after_refuel"] and s["first"] == day and s["first"] < s["last"])]
+        options = [i for i, s in enumerate(segments) if i >= current and s["first"] <= day <= s["last"] and not s["fixed"]]
         if not options and day > segments[-1]["last"]:
             raise Problem(f"Jazda {trip['id']} ({sk_day(day)}) je po dni odčítania tachometra ({sk_day(segments[-1]['last'])}). "
                           "Opravte jej dátum alebo dátum odčítania.")
@@ -703,8 +742,9 @@ def pull_before_reading(db, vehicle, session, state, points, spans):
                  f"pred odčítanie tachometra {sk_day(close)}.") for t in late]
 
 
-def recalculate(db, vehicle, session, state):
-    """Re-run all backend checks on the draft schedule. Returns problems the assistant asks about."""
+def recalculate(db, vehicle, session, state, balance=True):
+    """Re-run all backend checks on the draft schedule. Returns problems the assistant asks about. With `balance`, the
+    days of estimated trips are re-chosen when a fresh plan asks for it or the tank would run dry / overflow."""
     sort_trips(state)
     state["moves"] = []
     if not state["trips"]:
@@ -712,7 +752,6 @@ def recalculate(db, vehicle, session, state):
     placed = None
     try:
         points, spans = check_month(db, vehicle, session, state)
-        points = fuel_points(db, vehicle, session, state, points, len(state["trips"]))
         state["moves"] = pull_before_reading(db, vehicle, session, state, points, spans)
         segments, moves = fill_gaps(db, vehicle, session, state, points, spans)
         state["moves"] += moves
@@ -723,6 +762,18 @@ def recalculate(db, vehicle, session, state):
         assign(segments, state["trips"])
         problems = distribute(segments)
         placed = segments
+        fresh = state.pop("schedule_fuel", False)
+        if balance and not problems:
+            chain(state, placed)
+            if fresh or tank_balance(db, vehicle, session, state)["violations"]:
+                moved = schedule_for_fuel(db, vehicle, session, state, segments)
+                segments = segments_for(session, state, points, vehicle, spans)
+                assign(segments, state["trips"])
+                problems = distribute(segments)
+                placed = segments
+                if moved and not fresh:
+                    state["moves"].append(dict(id=moved[0], text="Dni jázd " + ", ".join(moved) + " som posunul podľa "
+                                               "tankovaní, aby nádrž nešla do mínusu a tankovanie sa zmestilo do nádrže."))
     except Problem as problem:
         problems = [str(problem)]
     chain(state, placed)
@@ -752,7 +803,17 @@ def build_trips(db, vehicle, session, state):
                 free.append(route)
     if len(fixed) + len(free) > MAX_TRIPS:
         raise Problem(f"Návrh môže mať najviac {MAX_TRIPS} jázd. Znížte počet opakovaní.")
-    points = fuel_points(db, vehicle, session, state, points, MAX_TRIPS)  # missing trips are added below
+
+    # Around refuels without an odometer the schedule only chooses days: there must be at least one trip more than
+    # such refuels, so every stretch between them can get one. Trip lengths stay as the destinations dictate.
+    added = 0
+    soft = [r for r in soft_refuels(db, vehicle, session, state) if first <= r[0] <= last]
+    by_length = sorted(state["routes"], key=lambda r: -(r.get("approximate_km") or 0))
+    while soft and free and len(fixed) + len(free) <= len(soft) and len(fixed) + len(free) < MAX_TRIPS:
+        route = by_length[added % len(by_length)]
+        route["count"] += 1
+        free.append(route)
+        added += 1
 
     def make(route, day, confirmed):
         return dict(id="", day=day, origin=route.get("origin") or state["origin"] or distances.HOME, destination=route["destination"],
@@ -770,8 +831,6 @@ def build_trips(db, vehicle, session, state):
         raise Problem("Všetky kilometre mesiaca už pokrývajú jazdy uložené v knihe. Nie je čo navrhnúť.")
     # Every stretch between refuels/readings needs a trip: repeat the longest destinations rather than let a refuel
     # overflow the tank or the tank run dry.
-    added = 0
-    by_length = sorted(state["routes"], key=lambda r: -(r.get("approximate_km") or 0))
     while len(empty) > len(free) and len(fixed) + len(free) < MAX_TRIPS:
         route = by_length[added % len(by_length)]
         route["count"] += 1
@@ -808,6 +867,7 @@ def build_trips(db, vehicle, session, state):
     for trip in trips:
         trip["id"] = next_id(state, "J")
     state["trips"] = trips
+    state["schedule_fuel"] = True  # days are re-chosen around refuels once kilometres are known (recalculate)
     return [trip["id"] for trip in trips]
 
 
@@ -977,6 +1037,7 @@ def tank_balance(db, vehicle, session, state):
             odo = receipt["odo"] if receipt.get("odo") is not None else 10**12
             events.append(((receipt["day"], odo, 1, "", 10**6 + index), "fuel", receipt["id"], D(receipt["liters"]), None))
     level, purchased, consumed, rows, warnings, days = D(opening), D(0), D(0), {}, [], {}
+    violations = 0
     tolerance = max(D(1), vehicle.capacity * D("0.03"))
     planned = bool(state["trips"])
     for key, kind, row_id, amount, *rest in sorted(events, key=lambda event: event[0]):
@@ -986,11 +1047,15 @@ def tank_balance(db, vehicle, session, state):
             level -= amount
             consumed += amount
         else:
+            if before < -tolerance:
+                violations += 1
             if planned and before < -tolerance:
                 warnings.append(f"Pred tankovaním {sk_day(key[0])}{label} by nádrž podľa "
                                 f"normy klesla na {liters(before)}. Chýba skoršie tankovanie alebo sú kilometre privysoké.")
             level += amount
             purchased += amount
+            if level > vehicle.capacity + tolerance:
+                violations += 1
             if planned and level > vehicle.capacity + tolerance:
                 warnings.append(f"Tankovanie {sk_day(key[0])}{label}: pred tankovaním "
                                 f"{liters(before)} + {liters(amount)} = {liters(level)}, čo je viac ako nádrž "
@@ -1013,7 +1078,7 @@ def tank_balance(db, vehicle, session, state):
             if rate > 0 else f"Na konci mesiaca by nádrž podľa normy bola na {liters(level)}. Chýba tankovanie alebo sú kilometre privysoké.")
     return dict(opening=rounded(D(opening), "0.1"), purchased=rounded(purchased, "0.1"), consumed=rounded(consumed, "0.1"),
                 closing=rounded(level, "0.1"), capacity=rounded(vehicle.capacity, "0.1"), planned=planned,
-                rows=rows, days=days, warnings=warnings)
+                rows=rows, days=days, warnings=warnings, violations=violations)
 
 
 def tank_text(db, vehicle, session, state):
@@ -1070,12 +1135,43 @@ def say(state, role, text, changed=()):
     state["messages"] = state["messages"][-MAX_MESSAGES:]
 
 
+def build_balanced(db, vehicle, session, state):
+    """build_trips, then while the tank would still run dry before a refuel or a refuel would overflow it, split the
+    trip that needs the most fuel (one more occurrence of its destination) and plan again. A split that does not
+    reduce the problems (e.g. they come from fixed odometer readings) is undone."""
+    changed = build_trips(db, vehicle, session, state)
+    added = state.pop("added_for_fuel", 0)
+    for _ in range(8):
+        if recalculate(db, vehicle, session, state):
+            break
+        violations = tank_balance(db, vehicle, session, state)["violations"]
+        if not violations:
+            break
+        movable = [t for t in state["trips"] if not t["day_confirmed"] and not t["km_confirmed"]]
+        route = next((r for t in sorted(movable, key=lambda t: -t["distance"]) for r in state["routes"]
+                      if r["destination"] == t["destination"]), None)
+        if route is None:
+            break
+        saved, saved_changed = deepcopy(state), changed
+        route["count"] += 1
+        changed = build_trips(db, vehicle, session, state)
+        state.pop("added_for_fuel", None)
+        if recalculate(db, vehicle, session, state) or tank_balance(db, vehicle, session, state)["violations"] >= violations:
+            state.clear()
+            state.update(saved)
+            changed = saved_changed
+            break
+        added += 1
+    state["added_for_fuel"] = added
+    return changed
+
+
 def auto_plan(db, vehicle, session, state):
     """Create the first schedule as soon as the month is described (start, end and routes). Returns (ids, text)."""
     if state["trips"] or not state["routes"] or state["start_odo"] is None or state["end_odo"] is None:
         return [], ""
     try:
-        changed = build_trips(db, vehicle, session, state)
+        changed = build_balanced(db, vehicle, session, state)
     except Problem as problem:
         return [], str(problem)
     added = state.pop("added_for_fuel", 0)
@@ -1524,7 +1620,7 @@ def plan(session_id: str, data: PlanIn, db=Db, user=Member):
     session, vehicle, state = session_for(db, user, session_id)
     require_draft(session)
     try:
-        changed = build_trips(db, vehicle, session, state) if data.rebuild or not state["trips"] else [t["id"] for t in state["trips"]]
+        changed = build_balanced(db, vehicle, session, state) if data.rebuild or not state["trips"] else [t["id"] for t in state["trips"]]
         state.pop("added_for_fuel", None)
     except Problem as problem:
         say(state, "assistant", str(problem))
@@ -1567,7 +1663,7 @@ def approve(session_id: str, data: ApproveIn, db=Db, user=Member):
         db.commit()
         fail("Evidencia vozidla sa od prípravy návrhu zmenila. Prepočítajte harmonogram a skontrolujte ho.", 409)
     check = deepcopy(state)
-    if recalculate(db, vehicle, session, check) or [(t["day"], t["distance"]) for t in check["trips"]] != \
+    if recalculate(db, vehicle, session, check, balance=False) or [(t["day"], t["distance"]) for t in check["trips"]] != \
             [(t["day"], t["distance"]) for t in state["trips"]]:
         fail("Harmonogram už nezodpovedá kontrolám. Prepočítajte ho a skontrolujte.", 409)
     kept = saved_rows(db, vehicle, session, state)[0]
