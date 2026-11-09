@@ -15,9 +15,9 @@ from openpyxl.utils.exceptions import InvalidFileException
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 
-from . import assistant, distances, exports, importer, planner, purge
+from . import assistant, distances, exports, fuel_invoice, importer, planner, purge
 from .auth import COOKIE, DUMMY, administrator, check_password, current_user, db_session, digest, hash_password, login
-from .db import (Access, AssistantFile, AssistantSession, Audit, Batch, Closing, Destination, Fuel, Holiday, Login,
+from .db import (FuelInvoice, Access, AssistantFile, AssistantSession, Audit, Batch, Closing, Destination, Fuel, Holiday, Login,
                  MonthlyDraft, Trip, User, Vehicle, now)
 from .ledger import events, ledger, month_of, months, next_month, report, rounded
 from .schemas import Credentials, DestinationIn, FuelIn, TripIn, UserIn, VehicleIn, VehicleDelete, MonthlyPlanIn, MonthlyApproval
@@ -450,6 +450,49 @@ def save_user(data: UserIn,identifier: int | None=None,db=Db,user=Admin):
 @app.get("/api/audit")
 def audit_log(db=Db,user=Admin):
     return json_value([serialized(r) for r in db.scalars(select(Audit).order_by(Audit.id.desc()).limit(200))])
+
+@app.post("/api/fuel-invoices")
+def fuel_invoice_import(file: UploadFile=File(),apply: bool=False,expected_digest: str | None=None,db=Db,user=Admin):
+    """Súhrnná faktúra z tankovacích kariet: náhľad (apply=false), potom zápis tankovaní ku vozidlám podľa ŠPZ."""
+    content = file.file.read(10_000_001)
+    if len(content) > 10_000_000:
+        fail("Súbor presahuje 10 MB.")
+    try:
+        parsed = fuel_invoice.check(db,fuel_invoice.parse(content))
+    except fuel_invoice.InvoiceError as error:
+        fail(str(error))
+    if not apply:
+        return parsed
+    if expected_digest != parsed["digest"]:
+        fail("Súbor sa zmenil. Nahrajte faktúru znova.",409)
+    if parsed["already"]:
+        fail(f"Faktúra {parsed['number']} už bola zapísaná.",409)
+    by_vehicle = {}
+    for card in parsed["cards"]:
+        for row in card["rows"]:
+            if not row["write"]:
+                continue
+            vehicle = vehicle_for(db,user,card["vehicle"]["id"],True)
+            fuel = Fuel(vehicle_id=vehicle.id,day=date.fromisoformat(row["day"]),odo=row["odo"],liters=row["liters"],
+                        gross=row["gross"],vat=row["rate"],station=row["station"][:150],clock=row["clock"],
+                        note=fuel_invoice.note(parsed,row),measured=None)
+            db.add(fuel)
+            by_vehicle.setdefault(vehicle.id,[]).append(row["voucher"])
+    db.add(FuelInvoice(number=parsed["number"],supplier=parsed["supplier"],
+                       issued=date.fromisoformat(parsed["issued"]) if parsed["issued"] else None,total=parsed["total"],
+                       written=parsed["write"],skipped=parsed["skip"],imported_by=getattr(user,"display_name",None) or user.username))
+    db.flush()
+    for vehicle_id,vouchers in by_vehicle.items():
+        audit(db,user,"Tankovania z faktúry",vehicle_id,invoice=parsed["number"],vouchers=vouchers)
+    skipped = [{"plate":card["plate"],"day":row["day"],"liters":row["liters"],"gross":row["gross"],"reason":row["reason"]}
+               for card in parsed["cards"] for row in card["rows"] if not row["write"]]
+    audit(db,user,"Faktúra z tankovacích kariet",None,invoice=parsed["number"],written=parsed["write"],skipped=skipped)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        fail(f"Faktúra {parsed['number']} už bola zapísaná.",409)
+    return {"number":parsed["number"],"written":parsed["write"],"vehicles":len(by_vehicle),"skipped":skipped}
 
 @app.post("/api/import")
 def workbook_import(file: UploadFile=File(),apply: bool=False,expected_digest: str | None=None,db=Db,user=Admin):

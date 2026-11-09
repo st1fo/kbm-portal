@@ -283,3 +283,24 @@ details > summary { cursor: pointer; }
   border-radius: 10px; background: var(--tank-bg); border: 1px solid var(--line); font-size: .85rem; }
 .tank-strip .plus b { color: var(--plus); }
 .tank-strip .minus b { color: var(--minus); }
+/* faktúra z tankovacích kariet */
+.invoice-preview { margin-top: 16px; display: flex; flex-direction: column; gap: 12px; }
+.invoice-preview h3 { margin: 0; font-size: 1.05rem; }
+.invoice-card { border: 1px solid var(--line, #dfe3e0); border-radius: 10px; overflow: hidden; }
+.invoice-card.missing { border-color: #d9a441; }
+.invoice-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 9px 12px; background: var(--soft, rgba(127,127,127,.07)); }
+.invoice-card-sum { margin-left: auto; font-variant-numeric: tabular-nums; font-size: .9rem; }
+.invoice-row { display: grid; grid-template-columns: 112px minmax(0,1fr) 78px 82px minmax(150px,auto); gap: 10px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--line, #eceeec); font-size: .9rem; }
+.invoice-row.skip { opacity: .85; background: rgba(217,164,65,.07); }
+.invoice-row small { display: block; color: var(--muted, #6b726d); font-size: .78rem; }
+.invoice-row .num { text-align: right; font-variant-numeric: tabular-nums; }
+.invoice-day small { display: inline; margin-left: 4px; }
+.invoice-station { min-width: 0; overflow-wrap: anywhere; }
+.invoice-state { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.invoice-reason, .invoice-warn { display: inline-flex; gap: 5px; align-items: flex-start; font-size: .82rem; color: #a2650c; }
+.invoice-warn { color: #b3261e; }
+.invoice-skipped { margin: 6px 0 8px; padding-left: 18px; }
+@media (max-width: 700px) {
+  .invoice-row { grid-template-columns: 1fr auto; }
+  .invoice-station, .invoice-state { grid-column: 1 / -1; }
+}

@@ -283,3 +283,70 @@ class LogbookTests(unittest.TestCase):
         self.assertEqual(self.period(keep)["distance"],30)
         # rovnaké EČV možno po zmazaní znova pridať
         self.add_vehicle("DELETE")
+
+
+INVOICE = """Zákaznícke číslo SK10018565 KBM, S.R.O. Súhrnná faktúra
+Dátum faktúry 31.01.2024 ŽITNÁ 13
+Číslo faktúry E0900000001 010 01 ŽILINA Faktúru vystavil
+Číslo inkasa 1 SK FleetCor Slovakia s.r.o.
+Prehľad produktov Množstvo Popis Čiastka Sadzba DPH Čiastka
+Nafta 70,00 SK základná 91,06 23,00 20,94 112,00
+Natural 95 10,00 SK základná 12,20 23,00 2,80 15,00
+AdBlue 5,00 SK základná 4,07 23,00 0,93 5,00
+Celkom 24,67 132,00
+Číslo karty Meno vodiča ŠPZ
+7002337219961501714 TEST-FC1
+Stav km Dátum Čas Číslo Miesto čerpania Mesto Sieť Produkt Množstvo Zľava Jednotková Čiastka Sadzba DPH Čiastka
+0 15.01.2024 08:33 981897 8276 Zilina Hri Žilina Shell Sk Nafta 40,00 -0,02 1,593 52,03 23,00 11,97 64,00
+0 20.01.2024 09:16 908249 8276 Zilina Hri Žilina Shell Sk Natural 95 10,00 -0,02 1,600 12,20 23,00 2,80 15,00
+0 21.01.2024 09:20 908250 8276 Zilina Hri Žilina Shell Sk AdBlue 5,00 0,00 0,813 4,07 23,00 0,93 5,00
+Karta celkom 68,30 15,70 84,00
+Číslo karty Meno vodiča ŠPZ
+7002337219961538856 ING. JOZEF MILO AB484EM
+Stav km Dátum Čas Číslo Miesto čerpania Mesto Sieť Produkt Množstvo Zľava Jednotková Čiastka Sadzba DPH Čiastka
+0 19.01.2024 11:56 988759 8269 Zilina Vys Žilina Shell Sk Nafta 30,00 -0,02 1,495 39,03 23,00 8,97 48,00
+Karta celkom 39,03 8,97 48,00
+Celkom za všetky karty 107,33 24,67 132,00""".splitlines()
+
+
+class FuelInvoiceTests(unittest.TestCase):
+    """Súhrnná faktúra FleetCor: rozdelenie podľa ŠPZ, dôvody preskočenia, žiadny dvojitý zápis."""
+    setUpClass = LogbookTests.setUpClass
+    setUp = LogbookTests.setUp
+    assert_status = LogbookTests.assert_status
+    period = LogbookTests.period
+
+    def test_fuel_invoice_import(self):
+        from app import fuel_invoice
+        original = fuel_invoice.lines_of
+        fuel_invoice.lines_of = lambda content: INVOICE
+        self.addCleanup(setattr, fuel_invoice, "lines_of", original)
+        vehicle = self.assert_status(self.client.post("/api/vehicles",json={**VEHICLE,"registration":"TEST FC1","fuel_type":"Nafta"}))
+        path = f"/api/vehicles/{vehicle['id']}"
+        # tankovanie 15. 1. už bolo zadané z bločku
+        self.assert_status(self.client.post(path+"/fuel",json={"day":"2024-01-15","liters":40,"gross":64,"vat":23}))
+        pdf = {"file":("faktura.pdf",b"%PDF-1.4 test","application/pdf")}
+        self.assert_status(member("vodic",vehicle["id"]).post("/api/fuel-invoices",files=pdf),403)
+        preview = self.assert_status(self.client.post("/api/fuel-invoices",files=pdf))
+        self.assertEqual((preview["number"],preview["write"],preview["skip"]),("E0900000001",1,3))
+        rows = {r["voucher"]:r for c in preview["cards"] for r in c["rows"]}
+        self.assertIn("už v knihe",rows["981897"]["reason"])
+        self.assertTrue(rows["908249"]["write"])
+        self.assertIn("Natural 95",rows["908249"]["warnings"][0])          # benzín do naftového auta
+        self.assertIn("Nie je to palivo",rows["908250"]["reason"])
+        self.assertEqual(rows["988759"]["reason"],"Vozidlo AB484EM nie je v Knihe jázd.")
+        self.assertEqual(preview["cards"][0]["vehicle"]["id"],vehicle["id"])   # „TEST FC1“ = „TEST-FC1“
+        self.assert_status(self.client.post("/api/fuel-invoices",files=pdf,params={"apply":True,"expected_digest":"x"}),409)
+        result = self.assert_status(self.client.post("/api/fuel-invoices",files=pdf,params={"apply":True,"expected_digest":preview["digest"]}))
+        self.assertEqual((result["written"],result["vehicles"],len(result["skipped"])),(1,1,3))
+        fuels = [r for r in self.period(path)["rows"] if r["type"] == "fuel"]
+        self.assertEqual(len(fuels),2)
+        added = next(r for r in fuels if r["day"] == "2024-01-20")
+        self.assertEqual((D(str(added["purchased"])),added["note"]),(D(10),"FleetCor E0900000001, poukážka 908249"))
+        again = self.assert_status(self.client.post("/api/fuel-invoices",files=pdf))
+        self.assertTrue(again["already"]) ; self.assertEqual(again["write"],0)
+        self.assert_status(self.client.post("/api/fuel-invoices",files=pdf,params={"apply":True,"expected_digest":preview["digest"]}),409)
+        # nesediaci súčet = faktúra sa odmietne
+        fuel_invoice.lines_of = lambda content: [l.replace("Karta celkom 39,03 8,97 48,00","Karta celkom 39,03 8,97 49,00") for l in INVOICE]
+        self.assertIn("nesedí",self.assert_status(self.client.post("/api/fuel-invoices",files=pdf),422)["detail"])
+        self.assert_status(self.client.post("/api/fuel-invoices",files={"file":("x.pdf",b"nie pdf","application/pdf")}),422)

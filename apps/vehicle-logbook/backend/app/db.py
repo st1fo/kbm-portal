@@ -124,6 +124,18 @@ class Audit(Base):
     data: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
+class FuelInvoice(Base):
+    """Zapísaná faktúra z tankovacích kariet; číslo faktúry bráni dvojitému zápisu."""
+    __tablename__ = "fuel_invoices"
+    number: Mapped[str] = mapped_column(String(40), primary_key=True)
+    supplier: Mapped[str] = mapped_column(String(40))
+    issued: Mapped[date | None] = mapped_column(Date)
+    total: Mapped[Decimal] = mapped_column(Amount)
+    written: Mapped[int]
+    skipped: Mapped[int]
+    imported_by: Mapped[str] = mapped_column(String(150))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
 class Batch(Base):
     __tablename__ = "import_batches"
     digest: Mapped[str] = mapped_column(String(64), primary_key=True)

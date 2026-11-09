@@ -8,6 +8,7 @@ import {
 import { api, errorText, fmt, localDay, monthName, type Account, type Entry, type Preview, type Report, type Row } from './api';
 import { DeleteVehicleDialog, destinationFields, fuelFields, RecordDialog, tripFields, UserDialog, vehicleFields, type Edit } from './forms';
 import { Icon } from './icons';
+import { FuelInvoiceDialog } from './FuelInvoice';
 import { MonthlyWizard } from './MonthlyWizard';
 import { nextTheme, themeLabels, useTheme, type ThemeMode, type ThemePref } from './theme';
 import './style.css';
@@ -177,6 +178,7 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
   const [search,setSearch]=useState('');
   const [descending,setDescending]=useState(true);
   const [annual,setAnnual]=useState(false);
+  const [invoice,setInvoice]=useState(false);   // dialóg faktúry z tankovacích kariet (správca)
   const [signed,setSigned]=useState(()=>localDay());   // dátum pri podpise vo výkaze; prázdny = ručne
   const [demoBusy,setDemoBusy]=useState(false);
   const vehicle=vehicles.find(v=>v.id===vehicleId);
@@ -313,6 +315,7 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
       onKeyDown:(e:KeyboardEvent)=>{if(e.key==='Enter')openRow(kind,row);}});
     return <>
       <PageTitle title={isTrip?'Jazdy':'Tankovanie'}>
+        {!isTrip&&account.admin&&<Button variant="outlined" startIcon={<Icon name="upload"/>} onClick={()=>setInvoice(true)}>Faktúra z kariet</Button>}
         {ready&&<><Button variant="outlined" startIcon={<Icon name="download"/>} href={exportLink('xlsx',kind)}>Excel</Button>
           <Button variant="contained" startIcon={<Icon name="plus"/>} disabled={closed} onClick={()=>rowEdit(kind)}>{isTrip?'Pridať jazdu':'Pridať tankovanie'}</Button></>}
       </PageTitle>
@@ -542,6 +545,7 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
     {edit&&<RecordDialog key={edit.path} edit={edit} close={()=>setEdit(undefined)} done={saved=>{
       if(edit.path==='/vehicles'&&saved?.id)setVehicleId(Number(saved.id));
       reload();}} />}
+    {invoice&&<FuelInvoiceDialog close={()=>setInvoice(false)} done={message=>{setInvoice(false);reload(message);}}/>}
     {userEdit&&<UserDialog account={userEdit} vehicles={vehicles} close={()=>setUserEdit(undefined)} done={()=>reload()}/>}
     {removing&&<DeleteVehicleDialog vehicle={removing} close={()=>setRemoving(undefined)} done={()=>{
       const plate=String(removing.registration);setRemoving(undefined);
