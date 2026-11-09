@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
   Alert, Button, Chip, CircularProgress, CssBaseline, Dialog, DialogActions, DialogContent, DialogTitle,
-  IconButton, MenuItem, Paper, Popover, Snackbar, TextField, ThemeProvider, Tooltip, createTheme, useMediaQuery,
+  IconButton, Menu, MenuItem, Paper, Popover, Snackbar, TextField, ThemeProvider, Tooltip, createTheme, useMediaQuery,
 } from '@mui/material';
 import { api, dateLabel, errorText, fmt, localDay, monthName, type Account, type Entry, type Preview, type Report, type Row } from './api';
 import { DeleteVehicleDialog, destinationFields, fuelFields, RecordDialog, tripFields, UserDialog, vehicleFields, type Edit } from './forms';
@@ -33,12 +33,13 @@ function ThemeToggle({ pref, setPref }: { pref: ThemePref; setPref: (p: ThemePre
   </Tooltip>;
 }
 
-type NavItem = { url: string; label: string; icon: string; admin?: boolean; context?: boolean };
+// context: stránka pracuje s vybraným vozidlom a mesiacom; na telefóne práve tieto sú v spodnej lište, ostatné v ponuke účtu.
+type NavItem = { url: string; label: string; icon: string; short?: string; admin?: boolean; context?: boolean };
 const NAV: NavItem[] = [
   { url: '/', label: 'Prehľad', icon: 'home', context: true },
   { url: '/jazdy', label: 'Jazdy', icon: 'route', context: true },
   { url: '/tankovanie', label: 'Tankovanie', icon: 'fuel', context: true },
-  { url: '/mesacny-navrh', label: 'Vyplniť mesiac', icon: 'wand', context: true },
+  { url: '/mesacny-navrh', label: 'Vyplniť mesiac', short: 'Mesiac', icon: 'wand', context: true },
   { url: '/vykazy', label: 'Výkazy', icon: 'report', context: true },
   { url: '/vozidla', label: 'Vozidlá', icon: 'car' },
   { url: '/sprava', label: 'Správa', icon: 'settings', admin: true },
@@ -180,6 +181,7 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
   const [invoice,setInvoice]=useState(false);   // dialóg faktúry z tankovacích kariet (správca)
   const [signed,setSigned]=useState(()=>localDay());   // dátum pri podpise vo výkaze; prázdny = ručne
   const [demoBusy,setDemoBusy]=useState(false);
+  const [menu,setMenu]=useState<HTMLElement|null>(null);   // ponuka účtu na telefóne
   const vehicle=vehicles.find(v=>v.id===vehicleId);
   const report=history[month-1];
   const path='/vehicles/'+vehicleId;
@@ -322,7 +324,8 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
         {all.length>0&&<div className="toolbar">
           <TextField size="small" placeholder={isTrip?'Hľadať cieľ, účel…':'Hľadať stanicu…'} value={search} onChange={e=>setSearch(e.target.value)}
             slotProps={{input:{startAdornment:<span className="search-icon"><Icon name="search" size={16}/></span>}}}/>
-          <Button size="small" startIcon={<Icon name="sort" size={16}/>} onClick={()=>setDescending(v=>!v)}>{descending?'Najnovšie hore':'Najstaršie hore'}</Button>
+          {phone?<Tooltip title={descending?'Najnovšie hore':'Najstaršie hore'}><IconButton onClick={()=>setDescending(v=>!v)} aria-label={descending?'Najnovšie hore':'Najstaršie hore'}><Icon name="sort"/></IconButton></Tooltip>
+            :<Button size="small" startIcon={<Icon name="sort" size={16}/>} onClick={()=>setDescending(v=>!v)}>{descending?'Najnovšie hore':'Najstaršie hore'}</Button>}
           {lockedChip}
           <span className="toolbar-sum">{isTrip?<>{all.length} jázd · <b>{fmt(totalKm)} km</b></>:<>{all.length}× · <b>{fmt(totalL)} l</b> · <b>{fmt(totalE)} €</b></>}</span>
         </div>}
@@ -499,22 +502,33 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
   </>;
 
   const initials=(account.name??account.username).split(/\s+/).map(p=>p[0]).join('').slice(0,2).toUpperCase();
-  return <div className="app">
+  const links=NAV.filter(item=>!item.admin||account.admin);
+  const link=(item:NavItem,short=false)=><NavLink key={item.url} to={item.url} end={item.url==='/'} onClick={()=>setSearch('')}>
+    <Icon name={item.icon} size={short?22:17}/><span>{short?item.short??item.label:item.label}</span></NavLink>;
+  return <div className={'app'+(phone?' phone':'')}>
     <header className="topbar">
       <NavLink className="brand" to="/" aria-label="Kniha jázd – prehľad"><img src="/vehicle-logbook/kbm-logo.png" alt="KBM"/><span className="brand-divider"/><span>Kniha jázd</span></NavLink>
       <a href="/" className="portal-link" title="Hlavná stránka portálu KBM" aria-label="Všetky aplikácie"><Icon name="grid" size={17}/><span>Všetky aplikácie</span></a>
-      <nav aria-label="Hlavné menu">{NAV.filter(item=>!item.admin||account.admin).map(item=>
-        <NavLink key={item.url} to={item.url} end={item.url==='/'} onClick={()=>setSearch('')}><Icon name={item.icon} size={17}/>{item.label}</NavLink>)}</nav>
-      <div className="account">
+      {!phone&&<nav aria-label="Hlavné menu">{links.map(item=>link(item))}</nav>}
+      {phone ? <div className="account">
+        <IconButton className="avatar-button" aria-label="Účet a ďalšie stránky" onClick={e=>setMenu(e.currentTarget)}><span className="avatar">{initials}</span></IconButton>
+        <Menu anchorEl={menu} open={Boolean(menu)} onClose={()=>setMenu(null)} anchorOrigin={{vertical:'bottom',horizontal:'right'}} transformOrigin={{vertical:'top',horizontal:'right'}}>
+          <MenuItem disabled className="menu-account">{account.name??account.username} · {account.admin?'Správca':'Používateľ'}</MenuItem>
+          {links.filter(item=>!item.context).map(item=><MenuItem key={item.url} selected={location.pathname===item.url}
+            onClick={()=>{setMenu(null);setSearch('');navigate(item.url);}}><Icon name={item.icon}/>&nbsp;&nbsp;{item.label}</MenuItem>)}
+          <MenuItem onClick={()=>setThemePref(nextTheme[themePref])}><Icon name={themePref==='light'?'sun':themePref==='dark'?'moon':'monitor'}/>&nbsp;&nbsp;Vzhľad: {themeLabels[themePref]}</MenuItem>
+          <MenuItem onClick={signOut}><Icon name="logout"/>&nbsp;&nbsp;Odhlásiť</MenuItem>
+        </Menu>
+      </div> : <div className="account">
         <ThemeToggle pref={themePref} setPref={setThemePref}/>
         <span className="avatar" title={account.name??account.username}>{initials}</span>
         <span className="account-name">{account.name??account.username}<small>{account.admin?'Správca':'Používateľ'}</small></span>
         <Tooltip title="Odhlásiť"><IconButton className="logout" onClick={signOut} aria-label="Odhlásiť"><Icon name="logout"/></IconButton></Tooltip>
-      </div>
+      </div>}
     </header>
     {current?.context&&vehicles.length>0&&<div className="context-bar">
       <TextField size="small" select value={vehicleId??''} onChange={e=>setVehicleId(Number(e.target.value))} className="vehicle-select"
-        slotProps={{htmlInput:{'aria-label':'Vozidlo'}}}>
+        slotProps={{htmlInput:{'aria-label':'Vozidlo'},select:phone?{renderValue:value=>String(vehicles.find(v=>v.id===value)?.registration??'')}:undefined}}>
         {vehicles.map(v=><MenuItem value={v.id} key={v.id}><b>{String(v.registration)}</b>&nbsp;<span className="muted">{v.name!==v.registration?String(v.name):''}</span></MenuItem>)}
       </TextField>
       <MonthPicker year={year} month={month} max={location.pathname==='/mesacny-navrh'?lastFinished:undefined}
@@ -540,6 +554,7 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </main>
+    {phone&&<nav className="bottom-nav" aria-label="Hlavné menu">{links.filter(item=>item.context).map(item=>link(item,true))}</nav>}
     {edit&&<RecordDialog key={edit.path} edit={edit} close={()=>setEdit(undefined)} done={saved=>{
       if(edit.path==='/vehicles'&&saved?.id)setVehicleId(Number(saved.id));
       reload();}} />}

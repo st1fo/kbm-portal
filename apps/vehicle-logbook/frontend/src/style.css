@@ -327,8 +327,58 @@ button.md-item:hover:not(:disabled) { border-color: var(--bar); background: var(
 .md-tag.bad { border-color: var(--err-line); color: var(--err-ink); background: var(--err-bg); }
 .edit-dialog { display: flex; flex-direction: column; gap: 14px; padding-top: 8px !important; }
 @media (max-width: 600px) {
-  .md-day { grid-template-columns: 58px minmax(0,1fr) 30px; }
+  .md-day { grid-template-columns: 62px minmax(0,1fr) 30px; gap: 6px; padding: 4px 2px; min-height: 34px; }
   .md-tank { display: none; }
   .md-date { font-size: .82rem; }
-  .md-date b { display: block; }
+  .md-date b { width: auto; margin-right: 3px; }
+  .md-none { font-size: .78rem; }
+  .md-item { padding: 4px 8px; font-size: .88rem; }
+  .md-legend { font-size: .78rem; line-height: 1.8; }
+}
+
+/* telefón: jeden riadok hlavičky, menu v spodnej lište, ostatné stránky v ponuke účtu */
+.bottom-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: grid; grid-template-columns: repeat(5,minmax(0,1fr));
+  background: var(--surface); border-top: 1px solid var(--line); padding: 4px 4px calc(4px + env(safe-area-inset-bottom)); box-shadow: 0 -2px 12px #0000000f; }
+.bottom-nav a { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 5px 0 3px; color: var(--muted); text-decoration: none;
+  font-size: 11.5px; font-weight: 600; border-radius: 12px; -webkit-tap-highlight-color: transparent; }
+.bottom-nav a .icon { padding: 3px 14px; border-radius: 999px; box-sizing: content-box; }
+.bottom-nav a.active { color: var(--green); }
+.bottom-nav a.active .icon { background: var(--green-soft); }
+.avatar-button { padding: 4px !important; }
+.menu-account { font-size: .85rem !important; opacity: 1 !important; color: var(--muted) !important; }
+.menu-account + li { border-top: 1px solid var(--line); }
+@media (max-width: 700px) {
+  .app.phone .topbar { flex-wrap: nowrap; min-height: 56px; padding: 0 8px 0 14px; gap: 10px; }
+  .app.phone .brand img { height: 30px; }
+  .app.phone .brand-divider { display: none; }
+  .app.phone .portal-link { width: 34px; height: 34px; border-radius: 8px; }
+  .context-bar { flex-wrap: nowrap; padding: 8px 10px 8px 14px; gap: 4px; }
+  .vehicle-select { flex: 1 1 auto; }
+  .vehicle-select .MuiSelect-select { font-weight: 700; letter-spacing: .03em; }
+  .month-picker { margin: 0 0 0 auto; flex: none; }
+  .month-label { font-size: 15px; min-width: 0; padding: 6px 4px; gap: 3px; }
+  .content { padding: 16px 14px calc(92px + env(safe-area-inset-bottom)); gap: 12px; }
+  h1 { font-size: 1.45rem; }
+  .page-title .actions > * { flex: 1 1 auto; white-space: nowrap; }
+  .toolbar { flex-wrap: nowrap; }
+  .toolbar-sum { flex-basis: auto; white-space: nowrap; font-size: .85rem; }
+  .toolbar:has(.toolbar-sum) { flex-wrap: wrap; }
+  .toolbar:has(.toolbar-sum) .MuiTextField-root { flex: 1 1 0; }
+  .toolbar:has(.toolbar-sum) .toolbar-sum { flex-basis: 100%; }
+  .card-row { padding: 10px 12px; }
+  .quick-tile { padding: 10px 12px; }
+  .quick-tile span { width: 38px; height: 38px; }
+  .stat { padding: 11px 12px; }
+  .stat strong { font-size: 1.25rem; }
+  .panel { padding: 14px; }
+  .vehicle-grid { gap: 8px; }
+  .vehicle-card { padding: 12px 14px; gap: 2px; }
+  .vehicle-card h3 { margin-top: 4px; font-size: .98rem; }
+  .vehicle-facts { margin: 6px 0 2px; font-size: .82rem; display: flex; flex-wrap: wrap; gap: 2px 14px; }
+  .vehicle-facts div { justify-content: flex-start; gap: 5px; }
+  .vehicle-card > p { margin-top: 0; font-size: .85rem; }
+  .vehicle-actions { padding-top: 4px; }
+  .metric-list { gap: 10px 14px; margin-top: 10px; }
+  .wizard-chat { height: calc(100dvh - 330px); min-height: 360px; }
+  .app.phone .MuiSnackbar-root { bottom: calc(80px + env(safe-area-inset-bottom)); }
 }
