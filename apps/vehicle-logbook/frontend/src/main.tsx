@@ -461,13 +461,14 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
       <p className="muted">Pri zápise jazdy sa z nich doplnia kilometre.</p></div>
       <Button variant="outlined" startIcon={<Icon name="plus"/>} onClick={()=>setEdit({title:'Nový cieľ',path:path+'/destinations',
         fields:destinationFields,initial:{}})}>Pridať cieľ</Button></div>
-      {destinations.length?<table className="records">
-        <thead><tr><th>Cieľ</th><th>Odkiaľ</th><th className="num">Jedným smerom</th><th/></tr></thead>
+      {destinations.length?<table className="records places">
+        <thead><tr><th>Cieľ</th><th className="wide-only">Odkiaľ</th><th className="num">{phone?'Km':'Jedným smerom'}</th><th className="wide-only"/></tr></thead>
         <tbody>{destinations.map(r=><tr key={String(r.id)} tabIndex={0} role="button" onClick={()=>setEdit({title:'Upraviť cieľ',
             path:path+'/destinations/'+r.id,fields:destinationFields,initial:r,editing:true,onDelete:()=>askDelete('destinations',r)})}>
-          <td><b>{String(r.name)}</b>{r.note&&<small className="muted block">{String(r.note)}</small>}</td><td>{r.origin||'—'}</td>
+          <td><b>{String(r.name)}</b>{(phone&&r.origin||r.note)&&<small className="muted block">{[phone&&r.origin?'z '+String(r.origin):'',String(r.note??'')].filter(Boolean).join(' · ')}</small>}</td>
+          <td className="wide-only">{r.origin||'—'}</td>
           <td className="num">{fmt(r.distance)} km</td>
-          <td className="actions-cell"><span className="row-actions" onClick={e=>e.stopPropagation()}>
+          <td className="actions-cell wide-only"><span className="row-actions" onClick={e=>e.stopPropagation()}>
             <Tooltip title="Odstrániť"><IconButton size="small" aria-label="Odstrániť" onClick={()=>askDelete('destinations',r)}><Icon name="trash" size={17}/></IconButton></Tooltip></span></td></tr>)}</tbody>
       </table>:<p className="muted">Zatiaľ žiadne ciele.</p>}
     </Paper>}
@@ -491,13 +492,13 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
       <Button sx={{mt:1.5}} variant="outlined" disabled={demoBusy} onClick={()=>void addDemo()}>{demoBusy?'Pripravujem…':'Otvoriť ukážkové vozidlo'}</Button>
     </Paper>
     <Paper variant="outlined" className="panel"><details><summary><h2 className="inline"><Icon name="history"/> História zmien</h2></summary>
-      <table className="records static">
+      <div className="table-wrap"><table className="records static">
         <thead><tr><th>Kedy</th><th>Čo</th><th>Kto</th><th>Vozidlo</th></tr></thead>
         <tbody>{audit.map(r=><tr key={String(r.id)}>
           <td className="nowrap">{r.created_at?new Date(String(r.created_at)).toLocaleString('sk-SK',{timeZone:'Europe/Bratislava',dateStyle:'short',timeStyle:'short'}):'—'}</td>
           <td>{r.action}</td><td>{users.find(u=>u.id===r.user_id)?.name??users.find(u=>u.id===r.user_id)?.username??'—'}</td>
           <td>{vehicles.find(v=>v.id===r.vehicle_id)?.registration??((r.data as unknown as Row)?.registration as string|undefined)??'—'}</td></tr>)}</tbody>
-      </table></details>
+      </table></div></details>
     </Paper>
   </>;
 

@@ -108,3 +108,31 @@
 .time-list button{border:0;background:none;color:var(--text);font:inherit;font-size:14px;font-variant-numeric:tabular-nums;padding:6px 10px;border-radius:5px;text-align:center;cursor:pointer}
 .time-list button:hover{background:var(--surface-3)}
 .time-list button.on{background:var(--accent);color:var(--on-green);font-weight:700}
+/* telefón: hlavička v jednom riadku, stránky v spodnej lište (rovnako ako Kniha jázd) */
+.nav-short{display:none}
+@media(max-width:640px){
+.topbar{flex-wrap:nowrap;min-height:58px;padding:0 8px 0 14px;gap:8px}
+.official-logo{height:38px;width:31px;padding:2px}
+.brand{gap:10px}.brand-divider{display:none}.brand>span:last-child{font-size:16px}
+.portal-link{width:34px;height:34px;border-radius:8px}
+.account{gap:0}.account .avatar{display:none}
+.notifications{top:60px;right:8px;left:8px;width:auto}
+.topbar nav{position:fixed;left:0;right:0;bottom:0;z-index:40;order:0;height:auto;width:auto;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:0;overflow:visible;
+  background:var(--surface);border-top:1px solid var(--line);padding:4px 4px calc(4px + env(safe-area-inset-bottom));box-shadow:0 -2px 12px #0000000f}
+.topbar nav button{display:flex;flex-direction:column;align-items:center;gap:2px;padding:5px 0 3px;font-size:11.5px;font-weight:600;color:var(--muted);background:none;border:0}
+.topbar nav button svg{display:block;width:22px;height:22px;padding:3px 14px;box-sizing:content-box;border-radius:999px}
+.topbar nav button.active{color:var(--text)}
+.topbar nav button.active svg{background:var(--primary-soft);color:var(--primary-text)}
+.topbar nav button.active:after{display:none}
+.topbar nav i{position:absolute;top:2px;left:calc(50% + 8px);padding:0 5px;font-size:10px;line-height:16px;color:#fff;background:var(--danger)}
+.nav-long{display:none}.nav-short{display:inline}
+body{padding-bottom:calc(70px + env(safe-area-inset-bottom))}
+.toast{bottom:calc(84px + env(safe-area-inset-bottom))}
+.page-heading{padding:18px 0 14px}.page-heading h1{font-size:24px;margin:0 0 4px;letter-spacing:-.6px}.page-heading p{font-size:13.5px}
+.heading-actions{margin-top:14px}
+}
+@media(max-width:640px){
+.hours-table th,.hours-table td{padding-left:8px;padding-right:8px}
+.hours-table tr:not(.hours-detail)>:first-child{position:sticky;left:0;z-index:1;background:var(--surface);box-shadow:1px 0 0 var(--line)}
+.hours-name small{display:none}
+}

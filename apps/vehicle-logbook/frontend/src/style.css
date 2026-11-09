@@ -380,5 +380,8 @@ button.md-item:hover:not(:disabled) { border-color: var(--bar); background: var(
   .vehicle-actions { padding-top: 4px; }
   .metric-list { gap: 10px 14px; margin-top: 10px; }
   .wizard-chat { height: calc(100dvh - 330px); min-height: 360px; }
+  .wide-only { display: none; }
+  .panel .records { font-size: .88rem; }
+  .panel .records td b { overflow-wrap: anywhere; }
   .app.phone .MuiSnackbar-root { bottom: calc(80px + env(safe-area-inset-bottom)); }
 }

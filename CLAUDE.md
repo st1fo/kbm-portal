@@ -65,7 +65,7 @@ Workplan's Denník has kanban boards (`app/boards.py`, migration 0004 moved the 
 
 Denník also has an AI day fill (`app/journal_ai.py`, `app/gemini.py`, frontend `journal/AiDayDialog.tsx`): free text → Gemini proposes activities/new tasks inside the day's unlogged worked time; the backend checks overlaps and pípnutia, and only `POST /api/journal/ai/apply` writes (one transaction). Tests replace `gemini.propose`.
 
-On phones (≤700 px) the logbook UI shows the data pages (`NAV` items with `context`) in a fixed bottom bar (`.bottom-nav`) and the remaining pages, theme and logout in the avatar menu; the vehicle/month bar is one row.
+On phones the logbook (≤700 px) shows the data pages (`NAV` items with `context`) in a fixed bottom bar (`.bottom-nav`) and the remaining pages, theme and logout in the avatar menu; the vehicle/month bar is one row; columns marked `.wide-only` are hidden. Workplan (≤640 px) turns its `.topbar nav` into the same kind of fixed bottom bar purely in CSS (`.nav-short` gives „Správa“ for Administrácia).
 
 All three UIs share a light/dark theme: `localStorage['kbm-theme']` (`light`/`dark`/`auto`) → `data-theme` on `<html>`, applied before paint by a small non-inline script (CSP forbids inline) and switched from the top bar. Use the CSS tokens on `:root` in `apps/workplan/frontend/src/styles.css` instead of hex colours.
 
