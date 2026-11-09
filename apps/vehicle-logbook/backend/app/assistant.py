@@ -8,6 +8,7 @@ trips and fuel purchases to the logbook in a single transaction on approval.
 import calendar
 import hashlib
 import json
+import re
 from copy import deepcopy
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -751,7 +752,7 @@ def build_trips(db, vehicle, session, state):
                 free.append(route)
     if len(fixed) + len(free) > MAX_TRIPS:
         raise Problem(f"Návrh môže mať najviac {MAX_TRIPS} jázd. Znížte počet opakovaní.")
-    points = fuel_points(db, vehicle, session, state, points, len(fixed) + len(free))
+    points = fuel_points(db, vehicle, session, state, points, MAX_TRIPS)  # missing trips are added below
 
     def make(route, day, confirmed):
         return dict(id="", day=day, origin=route.get("origin") or state["origin"] or distances.HOME, destination=route["destination"],
@@ -767,6 +768,16 @@ def build_trips(db, vehicle, session, state):
     empty = [i for i in open_segments if not counts[i]]
     if not open_segments:
         raise Problem("Všetky kilometre mesiaca už pokrývajú jazdy uložené v knihe. Nie je čo navrhnúť.")
+    # Every stretch between refuels/readings needs a trip: repeat the longest destinations rather than let a refuel
+    # overflow the tank or the tank run dry.
+    added = 0
+    by_length = sorted(state["routes"], key=lambda r: -(r.get("approximate_km") or 0))
+    while len(empty) > len(free) and len(fixed) + len(free) < MAX_TRIPS:
+        route = by_length[added % len(by_length)]
+        route["count"] += 1
+        free.append(route)
+        added += 1
+    state["added_for_fuel"] = added
     if len(empty) > len(free):
         source = "Tankovania a uložené jazdy" if spans else "Tankovania"
         raise Problem(f"{source} rozdeľujú mesiac na {len(open_segments)} úsekov s jazdou, "
@@ -1067,8 +1078,11 @@ def auto_plan(db, vehicle, session, state):
         changed = build_trips(db, vehicle, session, state)
     except Problem as problem:
         return [], str(problem)
+    added = state.pop("added_for_fuel", 0)
     return changed, (f"Pripravil som návrh {len(state['trips'])} jázd na celý mesiac. Odhady sú označené; "
-                     "konkrétne dni alebo kilometre mi môžete opraviť v chate alebo kliknutím na jazdu.")
+                     "konkrétne dni alebo kilometre mi môžete opraviť v chate alebo kliknutím na jazdu."
+                     + (f" Aby pred každým tankovaním bola jazda a palivo sa zmestilo do nádrže, pridal som {added} "
+                        f"{'jazdu' if added == 1 else 'jazdy' if added < 5 else 'jázd'} k najdlhším cieľom." if added else ""))
 
 
 def refresh(db, vehicle, session, state):
@@ -1249,7 +1263,8 @@ def message(session_id: str, data: MessageIn, db=Db, user=Member):
         receipt_checks(db, vehicle, session, state)
         history = [m for m in state["messages"][:-1] if m["role"] in {"user", "assistant"}][-HISTORY:]
         result = gemini.interpret(context(db, vehicle, session, state), history, data.text)
-        answer = [result.reply.strip()] if result.reply else []
+        reply = honest_reply(result.reply)
+        answer = [reply] if reply else []
         answer += notes
         if result.start_odo is not None or result.end_odo is not None or result.end_day:
             try:
@@ -1313,6 +1328,20 @@ def message(session_id: str, data: MessageIn, db=Db, user=Member):
         db.commit()
         return view(db, vehicle, session)
     return run_gemini_step(db, session, vehicle, state, work)
+
+
+CLAIM_WORDS = ("pripravil", "vytvoril", "vygeneroval", "pregeneroval", "upravil", "prepracoval", "rozložil", "rozdelil",
+               "presunul", "prepočítal", "opravil", "zmenil", "uložil", "pridal", "zapísal",
+               "pregenerujem", "vygenerujem", "prepočítam", "pripravím", "vytvorím", "upravím", "rozložím", "rozdelím",
+               "presuniem", "prepracujem", "opätovne odosielam", "je pripravený", "je pripravená", "je hotový", "je hotová",
+               "bol vytvorený", "bol upravený", "boli upravené", "boli rozložené")
+CLAIM = re.compile(r"\b(?:" + "|".join(re.escape(w) for w in CLAIM_WORDS) + r")\w*", re.IGNORECASE)
+
+def honest_reply(text):
+    """Drop sentences in which the model claims it changed the schedule itself; the system reports the real result."""
+    sentences = re.split(r"(?<=[.!?])\s+", (text or "").strip())
+    kept = [sentence for sentence in sentences if sentence and not CLAIM.search(sentence)]
+    return " ".join(kept) if kept else ("Rozumiem." if text else "")
 
 
 def problem_text(error):
@@ -1496,6 +1525,7 @@ def plan(session_id: str, data: PlanIn, db=Db, user=Member):
     require_draft(session)
     try:
         changed = build_trips(db, vehicle, session, state) if data.rebuild or not state["trips"] else [t["id"] for t in state["trips"]]
+        state.pop("added_for_fuel", None)
     except Problem as problem:
         say(state, "assistant", str(problem))
         store(session, state)

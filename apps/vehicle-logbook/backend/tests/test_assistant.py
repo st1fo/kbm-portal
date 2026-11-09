@@ -403,7 +403,7 @@ class AssistantFlowTests(unittest.TestCase):
         sent = json.loads(FAKE.calls[-1][2][-1].parts[0].text.split("```json\n", 1)[1].rsplit("\n```", 1)[0])
         self.assertEqual(sent["v_knihe"]["km_ulozenych_jazd"], 150)
         self.assertEqual(sent["v_knihe"]["tankovania"][0]["zdroj"], "FleetCor 123, poukážka 9")
-        self.assertEqual(len(draft["trips"]), 3)
+        self.assertEqual(len(draft["trips"]), 4)  # the FleetCor refuel on the 12th gets its own stretch (one trip added)
         self.assertEqual(draft["problems"], [])
         self.assertEqual(sum(t["distance"] for t in draft["trips"]), 600 - 150)
         rows = sorted([(t["day"], t["start_odo"], t["end_odo"]) for t in draft["trips"]]
@@ -416,10 +416,10 @@ class AssistantFlowTests(unittest.TestCase):
         self.assertEqual(draft["planned"], 600)
         self.assertTrue(draft["can_approve"])
         saved = self.ok(self.admin.post(f"/api/assistant/{sid}/approve", json={"version": draft["version"]}))
-        self.assertEqual(len(saved["result"]["trip_ids"]), 3)
+        self.assertEqual(len(saved["result"]["trip_ids"]), 4)
         with Session() as db:
             month = list(db.scalars(select(Trip).where(Trip.vehicle_id == vehicle["id"]).order_by(Trip.day, Trip.start_odo)))
-        self.assertEqual(len(month), 5)
+        self.assertEqual(len(month), 6)
         self.assertEqual(sum(1 for t in month if t.draft_id is None), 2)  # manual trips untouched
         for previous, trip in zip(month, month[1:]):
             self.assertEqual(previous.end_odo, trip.start_odo)
@@ -512,6 +512,29 @@ class AssistantFlowTests(unittest.TestCase):
             self.assertTrue(all(level >= -2 for level in levels), draft["tank"]["days"])
             self.assertEqual(any("Palivo na celý mesiac nestačí" in w for w in warnings), short, warnings)
             self.ok(self.admin.delete(f"/api/assistant/{sid}"))
+
+    def test_few_destinations_still_fit_every_refuel(self):
+        """Three refuels but only two trips described: trips are added so no refuel overflows the tank."""
+        vehicle = self.ok(self.admin.post("/api/vehicles", json={
+            "name": "Plná nádrž", "registration": "TEST-FULL", "start_date": self.day(1), "initial_odo": 20000,
+            "capacity": 60, "initial_liters": 50, "city_rate": 6, "outside_rate": 6}))
+        with Session() as db:
+            for number in (8, 16, 24):
+                db.add(Fuel(vehicle_id=vehicle["id"], day=date.fromisoformat(self.day(number)), odo=None, liters=D("45"),
+                            gross=D("70"), vat=D("23"), station="Shell", clock="", note="FleetCor 2, poukážka 2"))
+            db.commit()
+        sid = self.ok(self.admin.post(f"/api/vehicles/{vehicle['id']}/assistant", json={"month": self.month.isoformat()}))["id"]
+        draft = self.chat(sid, "Koniec 22 200, dvakrát Košice.", "Rozumiem, prepracoval som návrh jázd. Navrhujem Košice 2×.",
+                          end_odo=22200, routes=[{"destination": "Košice", "count": 2, "approximate_km": 480,
+                                                  "category": "mimo mesto", "days": []}])
+        self.assertEqual(draft["problems"], [])
+        self.assertGreaterEqual(len(draft["trips"]), 4)
+        self.assertFalse([w for w in draft["tank"]["warnings"] if "viac ako nádrž" in w or w.startswith("Pred tankovaním")],
+                         draft["tank"]["warnings"])
+        text = draft["messages"][-1]["text"]
+        self.assertIn("k najdlhším cieľom", text)
+        self.assertNotIn("prepracoval", text)  # the model's claim is dropped, its proposal kept
+        self.assertIn("Navrhujem Košice", text)
 
     def test_overloaded_model_falls_back_once(self):
         calls = []
