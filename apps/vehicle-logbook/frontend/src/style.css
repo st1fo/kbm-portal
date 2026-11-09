@@ -313,17 +313,18 @@ details > summary { cursor: pointer; }
 .md-legend { margin: 6px 0 10px; line-height: 1.9; }
 .md-undated { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 10px 0; }
 .month-days { list-style: none; margin: 10px 0 0; padding: 0; border-top: 1px solid var(--seg); }
-.md-day { display: grid; grid-template-columns: 74px minmax(0,1fr) 52px 34px; gap: 8px; align-items: start;
-  padding: 6px 4px; border-bottom: 1px solid var(--seg); min-height: 40px; }
+.md-day { display: grid; grid-template-columns: 74px minmax(0,1fr) 52px 34px; gap: 8px;
+  padding: 6px 4px; border-bottom: 1px solid var(--seg); min-height: 40px; align-items: center; }
 .md-day.off { background: var(--head); }
 .md-day.off .md-date b { color: var(--weekend); }
 .md-day.out { opacity: .55; }
-.md-date { padding-top: 6px; font-size: .9rem; white-space: nowrap; }
+.md-date { font-size: .9rem; white-space: nowrap; }
 .md-date b { display: inline-block; width: 22px; }
 .md-items { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.md-none { padding-top: 6px; font-size: .85rem; opacity: .6; }
-.md-tank { padding-top: 7px; font-size: .8rem; text-align: right; opacity: .75; white-space: nowrap; }
-.md-add { padding-top: 1px; }
+.md-none { font-size: .85rem; opacity: .6; }
+.md-tank { font-size: .8rem; text-align: right; opacity: .75; white-space: nowrap; }
+.md-add { display: flex; justify-content: center; align-items: center; }
+.md-add .MuiIconButton-root { width: 30px; height: 30px; flex: none; }
 .md-item { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; width: 100%; text-align: left; font: inherit; color: inherit;
   padding: 5px 9px; border-radius: 8px; border: 1px solid var(--blue-line); background: var(--surface); }
 button.md-item { cursor: pointer; }
