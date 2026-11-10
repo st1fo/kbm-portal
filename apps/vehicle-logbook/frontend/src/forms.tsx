@@ -56,7 +56,9 @@ export type Edit = { title:string; path:string; fields:Field[]; initial:Row;
   destinations?:Row[]; vehicleId?:number; editing?:boolean; onDelete?:()=>void };
 
 export function RecordDialog({ edit, close, done }: { edit: Edit; close:()=>void; done:(saved?:Row)=>void }) {
-  const [data,setData] = useState(edit.initial);
+  // Čísla z API majú 10 desatinných miest („42.5000000000“); vo formulári ich ukážeme bez koncových núl.
+  const [data,setData] = useState<Row>(() => Object.fromEntries(Object.entries(edit.initial).map(([key,value]) =>
+    [key, typeof value === 'string' && /^-?\d+\.\d+$/.test(value) && edit.fields.some(f => f.key === key && f.type === 'number') ? String(Number(value)) : value])));
   const [problem,setProblem] = useState('');
   const [busy,setBusy] = useState(false);
   const isTrip = edit.fields === tripFields, isFuel = edit.fields === fuelFields;
@@ -70,7 +72,7 @@ export function RecordDialog({ edit, close, done }: { edit: Edit; close:()=>void
     if (key === 'day' && value && edit.vehicleId && !edit.editing) {
       void api.get('/vehicles/'+edit.vehicleId+'/odometer',{params:{day:value}}).then(({data: defaults}) => {
         setData(previous => previous.day !== value ? previous : {...previous,
-          ...(isFuel ? {odo:defaults.odo,vat:defaults.vat} : {start_odo:defaults.odo})});
+          ...(isFuel ? {vat:defaults.vat} : {start_odo:defaults.odo})});
       }).catch(error => setProblem(errorText(error)));
     }
   }

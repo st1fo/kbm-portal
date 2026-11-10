@@ -7,6 +7,11 @@ from .db import Closing, Fuel, Holiday, Trip
 D = Decimal
 ZERO = D(0)
 
+def tank_tolerance(vehicle):
+    """How far the tank by the norm may go below empty or above full before a warning (real consumption varies)."""
+    return max(Decimal(1), Decimal(vehicle.capacity) * Decimal("0.03"))
+
+
 def rounded(value, quantum="0.01"):
     return value.quantize(D(quantum), rounding=ROUND_HALF_UP)
 
@@ -46,7 +51,7 @@ def ledger(db, vehicle):
             norm = (vehicle.city_rate if event.category == "mesto" else vehicle.outside_rate) * distance / 100
             if odo != event.start_odo:
                 row["warnings"].append("Tachometer jazdy nenadväzuje na predchádzajúci záznam.")
-            if consumed and consumed > liters:
+            if consumed and consumed > liters + tank_tolerance(vehicle):
                 row["warnings"].append("Vypočítaný stav nádrže pred tankovaním je záporný.")
             if liters > 0:
                 net -= min(consumed, liters) * net / liters
@@ -66,7 +71,7 @@ def ledger(db, vehicle):
                 row["warnings"].append("Pred tankovaním chýba jazda s rovnakým koncovým tachometrom.")
             # A receipt reading can flag missing driving without creating fictional kilometers.
             liters += event.liters
-            purchase_net = event.gross / (1 + event.vat / 100)
+            purchase_net = rounded(event.gross / (1 + event.vat / 100))   # per receipt, so totals match the listed rows
             net += purchase_net
             if event.measured is not None:
                 correction = event.measured - liters
@@ -78,7 +83,7 @@ def ledger(db, vehicle):
                 elif correction < 0 and liters > 0:
                     net *= event.measured / liters
                 liters = event.measured
-            if liters > vehicle.capacity or liters < 0:
+            if liters > vehicle.capacity + tank_tolerance(vehicle) or liters < -tank_tolerance(vehicle):
                 row["warnings"].append("Stav nádrže je mimo rozsahu vozidla.")
             row.update(type="fuel", odo=event.odo, purchased=event.liters, purchase_net=purchase_net,
                        vat=event.vat, station=event.station, clock=event.clock, note=event.note,

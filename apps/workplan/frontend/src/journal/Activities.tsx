@@ -34,6 +34,7 @@ export function ActivityForm({ uid, defaultDate, prefill, onError }: { uid: numb
   const [np, setNp] = useState({ name: '', customer: '' });
   const [nt, setNt] = useState({ name: '', customer: '' });
   const [date, setDate] = useState(defaultDate);
+  useEffect(() => setDate(defaultDate), [defaultDate]);   // karta otvorená cez polnoc: dátum ide s dnešným dňom
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [text, setText] = useState('');

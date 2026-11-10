@@ -148,6 +148,7 @@ def password(data:PasswordChange,request:Request,response:Response):
         if not verify(data.current,row["password"]): raise HTTPException(400,"Aktuálne heslo nie je správne.")
         db.execute("UPDATE users SET password=? WHERE slug=?",(hashed(data.password),user["slug"]))
         db.execute("DELETE FROM sessions WHERE slug=?",(user["slug"],))
+        db.execute("DELETE FROM invites WHERE slug=?",(user["slug"],))   # starý odkaz na heslo už nesmie platiť
     response.delete_cookie(COOKIE,path="/"); return {"ok":True}
 
 # ---------------------------------------------------------------- pozvánky a e-mail
@@ -268,7 +269,8 @@ def admin_users(request:Request):
     admin_only(request)
     with connect() as db:
         groups=groups_of(db)
-        pending={r["slug"]:r["kind"] for r in db.execute("SELECT slug, kind FROM invites WHERE expires>?",(time.time(),))}
+        now=time.time()   # pozvánka, ktorá vypršala bez nastavenia hesla: účet sa nedá použiť, kým admin nepošle nový odkaz
+        pending={r["slug"]:r["kind"] if r["expires"]>now else "expired" for r in db.execute("SELECT slug, kind, expires FROM invites") if r["expires"]>now or r["kind"]=="invite"}
         return [{**public_user(r,groups),"invite_pending":pending.get(r["slug"])} for r in db.execute("SELECT * FROM users ORDER BY name COLLATE NOCASE")]
 @app.post("/auth/admin/users")
 def admin_create(data:UserIn, request:Request):

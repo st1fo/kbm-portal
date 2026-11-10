@@ -179,9 +179,9 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
   const flagged = (item: Receipt, field: string) => item.missing.includes(field) || item.unreadable.includes(field);
   const needsReview = draft.receipts.length > 0;
   const approveText = [
-    `Uložiť ${draft.trips.length} jázd (${fmt(draft.planned - draft.saved.km, 0)} km) a ${draft.receipts.length} tankovaní do knihy jázd?`,
+    `Uložiť ${draft.trips.length} ${plural(draft.trips.length, 'jazdu', 'jazdy', 'jázd')} (${fmt(draft.planned - draft.saved.km, 0)} km) a ${draft.receipts.length} ${plural(draft.receipts.length, 'tankovanie', 'tankovania', 'tankovaní')} do knihy jázd?`,
     draft.saved.km || draft.saved.fuels.length ? 'Jazdy a tankovania, ktoré už sú v knihe, zostanú bez zmeny.' : '',
-    draft.replace_existing ? `Nahradí sa ${draft.existing.replaceable} skôr uložených odhadovaných jázd.` : '',
+    draft.replace_existing ? `Nahradia sa skôr uložené odhadované jazdy (${draft.existing.replaceable}).` : '',
     'Odhadované jazdy zostanú vo výkaze označené.'].filter(Boolean).join(' ');
   const readDay = draft.end_day ?? draft.days[draft.days.length - 1].day;
   let level = draft.tank ? Number(draft.tank.opening) : 0;
@@ -232,7 +232,7 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
         {draft.existing.manual > 0 && <> {draft.existing.manual} {plural(draft.existing.manual, 'ručne zapísaná jazda', 'ručne zapísané jazdy', 'ručne zapísaných jázd')} ({fmt(draft.existing.manual_km, 0)} km)</>}.
         Sú označené „v knihe“ a nemenia sa; návrh dopočíta iba zvyšné kilometre.</Alert>}
       {draft.existing.replaceable > 0 && !saved && <Alert severity="warning" sx={{ mt: 1.5 }} className={lit.has('existing') ? 'changed-field' : ''}>
-        Mesiac už obsahuje {draft.existing.replaceable} jázd ({fmt(draft.existing.km, 0)} km) uložených skôr ako mesačný odhad.
+        Mesiac už obsahuje jazdy uložené skôr ako mesačný odhad: {draft.existing.replaceable} ({fmt(draft.existing.km, 0)} km).
         <div><FormControlLabel control={<Switch checked={draft.replace_existing} disabled={locked}
           onChange={event => void operate([{ action: 'set_replace', replace: event.target.checked }])} />}
           label="Nahradiť uložený odhad týmto návrhom (staré jazdy sa odstránia až pri schválení)" /></div></Alert>}
@@ -317,7 +317,7 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
 
     <Paper variant="outlined" className="panel approve-panel">
       {saved ? <>
-        <Alert severity="success">Výkaz je uložený v knihe jázd: {draft.trips.length} jázd a {draft.receipts.length} tankovaní.
+        <Alert severity="success">Výkaz je uložený v knihe jázd: {draft.trips.length} {plural(draft.trips.length, 'jazda', 'jazdy', 'jázd')} a {draft.receipts.length} {plural(draft.receipts.length, 'tankovanie', 'tankovania', 'tankovaní')}.
           Odhadované jazdy sú vo výkaze označené ako mesačný odhad.</Alert>
         <div className="actions" style={{ marginTop: 14 }}>
           <Button variant="contained" href={exportUrl('pdf')}>Stiahnuť PDF výkaz</Button>

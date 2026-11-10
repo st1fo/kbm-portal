@@ -77,6 +77,7 @@ def report(db, users: list[User], start: date, end: date) -> dict:
             elif t or workday:                                   # pracovný deň (s plánom alebo bez záznamu)
                 off = 0.0
                 for r in parts:
+                    if r.type_id in types and is_work(types[r.type_id]): continue   # napr. školenie 2 h je odpracovaný čas
                     name = types[r.type_id].name if r.type_id in types else 'Absencia'
                     h = min(r.hours, daily - off)
                     if h <= 0: continue

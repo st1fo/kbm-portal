@@ -90,10 +90,12 @@ def day_info(db, uid, day):
     w = worked(db, uid, day)
     lg = logged(db, uid, day)
     free = subtract(w, [(x['start'], x['end']) for x in lg])
+    # do súhrnu dňa nepatria aktivity nasledujúceho dňa (okrem tých v odpracovanom čase cez polnoc)
+    shown = [x for x in lg if x['start'] < 1440 or any(s < x['end'] and x['start'] < e for s, e in w)]
     return {'date': day.isoformat(), 'configured': gemini.configured(),
             'worked': [label(r) for r in w], 'worked_min': sum(e - s for s, e in w),
-            'logged': [{**label((x['start'], x['end'])), 'task': x['task'], 'text': x['text']} for x in lg],
-            'logged_min': sum(min(x['end'], 2880) - max(x['start'], 0) for x in lg),
+            'logged': [{**label((x['start'], x['end'])), 'task': x['task'], 'text': x['text']} for x in shown],
+            'logged_min': sum(min(x['end'], 2880) - max(x['start'], 0) for x in shown),
             'free': [label(r) for r in free], 'free_min': sum(e - s for s, e in free)}, w, lg
 
 

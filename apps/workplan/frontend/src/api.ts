@@ -1,7 +1,7 @@
 export type User={id:number;name:string;email:string;role:string;active:boolean;daily_hours:number;groups?:string[];pages?:string[]};
 export type Kind={id:number;name:string;icon:string;color:string;description:string;requires_approval:boolean;active:boolean};
 export type Entry={id:number;user_id:number;date:string;type_id:number;start:string|null;end:string|null;note:string;request_id:number|null};
-export type Leave={id:number;user_id:number;type_id:number;start_date:string;end_date:string;status:string;note:string;reason:string;reviewed_by:number|null;reviewed_at:string|null;hours?:number|null};
+export type Leave={id:number;user_id:number;type_id:number;start_date:string;end_date:string;status:string;note:string;reason:string;reviewed_by_name?:string;reviewed_by:number|null;reviewed_at:string|null;hours?:number|null};
 /** Počet hodín po slovensky (1,5). */
 export const hrs=(h:number)=>String(Math.round(h*100)/100).replace('.',',');
 export const getToken=()=>'portal-session';

@@ -33,7 +33,7 @@ def month_context(db, vehicle, month, start_odo, end_odo, today, extra=(), repla
     stop = next_month(month)
     latest = db.scalar(select(Closing.month).where(Closing.vehicle_id == vehicle.id)
                        .order_by(Closing.month.desc()).limit(1))
-    if (latest and month <= latest) or (vehicle.imported_lock and month <= month_of(vehicle.imported_lock)):
+    if (latest and month <= latest) or (vehicle.imported_lock and stop - timedelta(days=1) <= vehicle.imported_lock):
         raise PlanError("Obdobie je uzavreté. Najprv ho musí správca otvoriť.")
     if stop <= vehicle.start_date:
         raise PlanError("Vybraný mesiac predchádza začiatku evidencie vozidla.")

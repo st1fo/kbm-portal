@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Dialog } from '../components/ui/dialog';
 import type { AiChecked, AiItem, AiRange } from './api';
 import { journalApi } from './api';
-import { fmtDur } from './calc';
+import { fmtDur, plural } from './calc';
 import { useProjects, useTasks } from './hooks';
 
 type Row = AiItem & Partial<Pick<AiChecked, 'errors' | 'warnings' | 'minutes' | 'next_day'>> & { key: number };
@@ -86,7 +86,7 @@ export function AiDayDialog({ uid, initialDate, onClose, onDone }: { uid: number
         <label className="ai-date">Deň<input type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} /></label>
         {d && <div className="ai-sum">
           <span><b>{fmtDur(d.worked_min)}</b> odpracované{d.worked.length ? <small>{ranges(d.worked)}</small> : <small>bez pípnutí</small>}</span>
-          <span><b>{fmtDur(d.logged_min)}</b> v aktivitách{d.logged.length > 0 && <small>{d.logged.length} {d.logged.length === 1 ? 'zápis' : 'zápisy'}</small>}</span>
+          <span><b>{fmtDur(d.logged_min)}</b> v aktivitách{d.logged.length > 0 && <small>{d.logged.length} {plural(d.logged.length, 'zápis', 'zápisy', 'zápisov')}</small>}</span>
           <span className={d.free_min ? 'free' : 'ok'}><b>{fmtDur(d.free_min)}</b> nezapísané{d.free.length > 0 && <small>{ranges(d.free)}</small>}</span>
         </div>}
       </div>

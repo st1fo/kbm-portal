@@ -11,5 +11,6 @@ def main():
         if not db.execute('SELECT 1 FROM users WHERE slug=?',(slug,)).fetchone(): raise SystemExit('Účet neexistuje.')
         db.execute('UPDATE users SET password=? WHERE slug=?',(hashed(password),slug))
         db.execute('DELETE FROM sessions WHERE slug=?',(slug,))
+        db.execute('DELETE FROM invites WHERE slug=?',(slug,))
     print('Heslo zmenené; existujúce relácie boli zrušené.')
 if __name__=='__main__':main()

@@ -96,10 +96,12 @@ export function Tour({ uid, steps, setPage, onClose }: { uid: number; steps: Tou
   }, [i, last, finish]);
 
   const centered = !box || !step.target;
+  const narrow = window.innerWidth < 640;   // telefón: karta ako pás dole/hore; inak pri prvku (šírka karty sa meria bez triedy „sheet“)
+  const sheetTop = !!box && box.top + box.height / 2 > window.innerHeight / 2;   // cieľ dole (spodná lišta) → karta hore
   return <div className="tour" role="dialog" aria-modal="true" aria-labelledby="tour-title">
     <div className={'tour-shade' + (centered ? ' full' : '')} />
     {box && !centered && <div className="tour-spot" style={box} />}
-    <div ref={card} className={'tour-card' + (centered ? ' centered' : pos ? '' : ' sheet')} style={pos && !centered ? pos : undefined} hidden={!ready}>
+    <div ref={card} className={'tour-card' + (centered ? ' centered' : !narrow ? '' : sheetTop ? ' sheet top' : ' sheet')} style={pos && !centered && !narrow ? pos : undefined} hidden={!ready}>
       <div className="tour-progress" aria-hidden="true">{steps.map((_, k) => <i key={k} className={k <= i ? 'on' : ''} />)}</div>
       <h2 id="tour-title">{step.title}</h2>
       <p>{step.text}</p>

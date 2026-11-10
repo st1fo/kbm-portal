@@ -40,8 +40,7 @@ export function DayCard({ uid, date, setDate, state, onError }: {
     const segs = cleanRows(next);
     const e = validate(segs);
     if (e) { setHint({ text: e, warn: true }); return; }
-    await run(() => journalApi.saveDay(date, segs.map(r => ({ start: r.in, end: r.out })), uid));
-    setHint({ text: 'Uložené.', warn: false });
+    if (await run(() => journalApi.saveDay(date, segs.map(r => ({ start: r.in, end: r.out })), uid))) setHint({ text: 'Uložené.', warn: false });
   }
   function addSegment() {
     const ls = clean[clean.length - 1];

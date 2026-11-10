@@ -36,7 +36,7 @@ function HistoryEditor({ date, day, uid, onClose, onError }: { date: string; day
     if (await run(() => journalApi.deleteDay(date, uid))) onClose();
   }
   return <tr className="j-hist-edit"><td colSpan={7} onClick={e => e.stopPropagation()}>
-    <SegmentRows rows={rows} onChange={setRows} onCommit={() => void save()} onEscape={onClose} liveMin={null} emptyText="Žiadne úseky — pridaj aspoň jeden." />
+    <SegmentRows rows={rows} onChange={setRows} onCommit={() => void save()} commitOnBlur={false} onEscape={onClose} liveMin={null} emptyText="Žiadne úseky — pridaj aspoň jeden." />
     <button className="secondary compact j-seg-add" onClick={() => setRows([...rows, { in: '', out: '' }])}><Plus size={14} />pridať úsek</button>
     <div className="j-he-foot">
       <span className={'j-he-info' + (err ? ' warn' : '')}>{err || `Odpracované ${fmtDur(c.work)} · prestávky ${fmtDur(c.brk)} · ${c.count} ${plural(c.count, 'úsek', 'úseky', 'úsekov')}`}</span>

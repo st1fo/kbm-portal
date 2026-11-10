@@ -32,16 +32,19 @@ login_attempts=defaultdict(deque)
 def notify_admins(db,message):
     for uid in db.scalars(select(User.id).where(User.role=='admin',User.active==True)):
         db.add(Notification(user_id=uid,message=message))
-def request_conflict(db,uid,start,end,exclude=None):
+def request_conflict(db,uid,start,end,exclude=None,partial_ok=False):
+    """partial_ok: schválená absencia na časť dňa plán dňa nenahrádza, preto zápisu plánu neprekáža."""
     q=select(LeaveRequest).where(LeaveRequest.user_id==uid,LeaveRequest.status.in_(['pending','approved']),LeaveRequest.start_date<=end,LeaveRequest.end_date>=start)
     if exclude: q=q.where(LeaveRequest.id!=exclude)
+    if partial_ok: q=q.where((LeaveRequest.hours.is_(None))|(LeaveRequest.status=='pending'))
     if db.scalar(q): raise HTTPException(409,'V rozsahu už existuje žiadosť. Najprv ju zrušte.')
 def full_day_absence(db,uid,d):
     e=db.scalar(select(Attendance).where(Attendance.user_id==uid,Attendance.date==d))
     t=db.get(AttendanceType,e.type_id) if e else None
     if t and not is_work(t): raise HTTPException(409,f'Dňa {d:%d.%m.%Y} je už celodenná absencia ({t.name}).')
 def apply_plan(db,p,request_id=None):
-    dates=working_dates(db,p.start_date,p.end_date) if request_id else list(days(p.start_date,p.end_date))
+    # rozsah dní zapíše iba pracovné dni (inak by víkendy nafúkli výkaz hodín); jeden deň sa dá naplánovať aj na víkend
+    dates=working_dates(db,p.start_date,p.end_date) if request_id or p.start_date!=p.end_date else [p.start_date]
     if not dates: raise HTTPException(422,'Rozsah neobsahuje pracovný deň.')
     for d in dates:
         e=db.scalar(select(Attendance).where(Attendance.user_id==p.user_id,Attendance.date==d).with_for_update())
@@ -126,7 +129,7 @@ def save_attendance(p:Plan,u=Depends(current_user),db:Session=Depends(get_db)):
     t=db.get(AttendanceType,p.type_id)
     if not t or not t.active: raise HTTPException(422,'Neaktívna alebo neexistujúca kategória.')
     if t.requires_approval or (u.role!='admin' and t.icon not in ['Building2','House']): raise HTTPException(403,'Na túto absenciu odošlite žiadosť.')
-    request_conflict(db,p.user_id,p.start_date,p.end_date)
+    request_conflict(db,p.user_id,p.start_date,p.end_date,partial_ok=is_work(t))
     apply_plan(db,p); audit(db,u,'attendance.save',p.model_dump()); commit(db); return {'ok':True}
 @app.delete('/api/attendance/{aid}')
 def delete_attendance(aid:int,u=Depends(current_user),db:Session=Depends(get_db)):
@@ -141,7 +144,8 @@ def delete_attendance(aid:int,u=Depends(current_user),db:Session=Depends(get_db)
 def requests(u=Depends(current_user),db:Session=Depends(get_db)):
     q=select(LeaveRequest).order_by(LeaveRequest.created_at.desc())
     if u.role!='admin': q=q.where(LeaveRequest.user_id==u.id)
-    return [row(x) for x in db.scalars(q)]
+    names=dict(db.execute(select(User.id,User.name)).all())   # kto žiadosť vybavil, aj keď nie je v skupine žiadateľa
+    return [{**row(x),'reviewed_by_name':names.get(x.reviewed_by)} for x in db.scalars(q)]
 @app.post('/api/requests')
 def add_request(p:Plan,u=Depends(current_user),db:Session=Depends(get_db)):
     owner(u,p.user_id); employee(db,p.user_id)
@@ -159,7 +163,9 @@ def add_request(p:Plan,u=Depends(current_user),db:Session=Depends(get_db)):
 def review(rid:int,p:Review,u=Depends(admin),db:Session=Depends(get_db)):
     r=db.scalar(select(LeaveRequest).where(LeaveRequest.id==rid).with_for_update())
     if not r: raise HTTPException(404,'Žiadosť neexistuje.')
-    if r.user_id==u.id: raise HTTPException(403,'Vlastnú žiadosť nemôžete schváliť ani zamietnuť.')
+    # vlastnú žiadosť vybaví iný administrátor; jediný administrátor by inak svoju absenciu nezapísal nikdy
+    if r.user_id==u.id and db.scalar(select(User.id).where(User.role=='admin',User.active==True,User.id!=u.id).limit(1)):
+        raise HTTPException(403,'Vlastnú žiadosť nemôžete schváliť ani zamietnuť.')
     if r.status!='pending': raise HTTPException(409,'Žiadosť už bola vybavená.')
     if p.status=='approved':
         employee(db,r.user_id)
@@ -167,7 +173,7 @@ def review(rid:int,p:Review,u=Depends(admin),db:Session=Depends(get_db)):
         if r.hours is not None: full_day_absence(db,r.user_id,r.start_date)
         else: apply_plan(db,Plan(user_id=r.user_id,type_id=r.type_id,start_date=r.start_date,end_date=r.end_date,note=r.note,replace=True),r.id)
     r.status=p.status; r.reason=p.reason; r.reviewed_by=u.id; r.reviewed_at=datetime.now(TZ)
-    db.add(Notification(user_id=r.user_id,message=f'Vaša žiadosť {r.start_date:%d.%m.} – {r.end_date:%d.%m.}: '+('schválená' if p.status=='approved' else 'zamietnutá')+'. '+p.reason))
+    db.add(Notification(user_id=r.user_id,message=(f'Vaša žiadosť {r.start_date:%d.%m.} – {r.end_date:%d.%m.}: '+('schválená' if p.status=='approved' else 'zamietnutá')+'. '+p.reason)[:500]))
     audit(db,u,'request.'+p.status,rid); commit(db); return row(r)
 @app.delete('/api/requests/{rid}')
 def cancel_request(rid:int,u=Depends(current_user),db:Session=Depends(get_db)):

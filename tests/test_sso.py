@@ -189,7 +189,7 @@ def test_admin_permanently_deletes_user_with_all_app_data(services):
         me=app.get(services['workplan']+'/api/auth/me').json()
         assert app.post(services['workplan']+'/api/attendance',json={'user_id':me['id'],'type_id':1,'start_date':'2026-11-02','end_date':'2026-11-02'}).status_code==200
         assert app.put(services['workplan']+'/api/journal/days/2026-11-02',json={'segments':[{'start':'08:00','end':'12:00'}]}).status_code==200
-        assert app.post(services['workplan']+'/api/journal/todos',json={'text':'zavolať'}).status_code==200
+        assert app.post(services['workplan']+'/api/journal/boards',json={'name':'Moje veci'}).status_code==200
         assert app.get(services['logbook']+'/api/me').status_code==200
     with client(services) as admin:
         login(admin)
@@ -197,7 +197,7 @@ def test_admin_permanently_deletes_user_with_all_app_data(services):
         assert admin.request('DELETE','/auth/admin/users/maros',json={'confirm':'maros'}).status_code==422
         r=admin.request('DELETE','/auth/admin/users/eva',json={'confirm':'eva'})
         assert r.status_code==200,r.text
-        res=r.json()['results']; assert res['workplan']['found'] and res['workplan']['counts']['plany']==1 and res['workplan']['counts']['todo']==1
+        res=r.json()['results']; assert res['workplan']['found'] and res['workplan']['counts']['plany']==1 and res['workplan']['counts']['nastenky']>=1
         assert res['vehicle-logbook']['found']
         assert 'eva' not in [u['slug'] for u in admin.get('/auth/admin/users').json()]
         assert any(a['action']=='user.delete' for a in admin.get('/auth/admin/audit').json())

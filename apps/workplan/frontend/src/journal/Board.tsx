@@ -68,7 +68,8 @@ function BoardView({ id, uid, me, users, onWrite, onError, onGone }: { id: numbe
   const q = useBoard(id, teamPoll && !dragging ? 15000 : false);
   const b = q.data;
   useEffect(() => setTeamPoll(!!b?.team), [b?.team]);
-  const [filter, setFilter] = useLocalSetting('kbm-board-filter', 'all') as [Filter, (v: string) => void];
+  const [storedFilter, setFilter] = useLocalSetting('kbm-board-filter', 'all') as [Filter, (v: string) => void];
+  const filter: Filter = storedFilter === 'mine' && !b?.team ? 'all' : storedFilter;   // osobná nástenka filter „Moje“ nemá
   const [search, setSearch] = useState('');
   const [openCard, setOpenCard] = useState<number | null>(null);
   const [settings, setSettings] = useState(false);

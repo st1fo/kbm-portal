@@ -9,9 +9,11 @@ export type DraftRow = { in: string; out: string };
  * Editovateľné úseky dňa (renderSegRows). Zmeny sa držia lokálne a uložia sa, až keď fokus opustí zoznam
  * alebo pri Enter; prepisovanie celého zoznamu počas písania by v Chrome kradlo fokus.
  */
-export function SegmentRows({ rows, onChange, onCommit, liveMin, emptyText, onEscape }: {
+export function SegmentRows({ rows, onChange, onCommit, liveMin, emptyText, onEscape, commitOnBlur = true }: {
   rows: DraftRow[]; onChange: (rows: DraftRow[]) => void; onCommit: (rows: DraftRow[]) => void;
   liveMin: number | null; emptyText: string; onEscape?: () => void;
+  /** false = editor s vlastným tlačidlom Uložiť: opustenie poľa ani odstránenie úseku nič neukladá (ukladá iba Enter). */
+  commitOnBlur?: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const dirty = useRef(false);
@@ -20,7 +22,7 @@ export function SegmentRows({ rows, onChange, onCommit, liveMin, emptyText, onEs
   if (!rows.length) return <div className="j-seg-empty">{emptyText}</div>;
   return <div ref={host} className="j-segs" onBlur={e => {
     if (e.relatedTarget && host.current?.contains(e.relatedTarget as Node)) return;
-    if (dirty.current) { dirty.current = false; onCommit(rows); }
+    if (commitOnBlur && dirty.current) { dirty.current = false; onCommit(rows); }
   }}>
     {rows.map((r, i) => {
       const gap = i > 0 && u[i - 1].out != null && u[i].in != null ? Math.max(0, u[i].in! - u[i - 1].out!) : null;
@@ -42,7 +44,7 @@ export function SegmentRows({ rows, onChange, onCommit, liveMin, emptyText, onEs
           </label>)}
           <span className={'j-seg-dur' + (running ? ' run' : '')} title={running ? 'beží' : undefined}>{dur}</span>
           <button type="button" className="icon-button" aria-label={`Odstrániť úsek ${i + 1}`} title="Odstrániť úsek"
-            onClick={() => { dirty.current = false; const next = rows.filter((_, j) => j !== i); onChange(next); onCommit(next); }}><X size={16} /></button>
+            onClick={() => { dirty.current = false; const next = rows.filter((_, j) => j !== i); onChange(next); if (commitOnBlur) onCommit(next); }}><X size={16} /></button>
         </div>
       </div>;
     })}

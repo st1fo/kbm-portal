@@ -5,11 +5,12 @@ import {
   Alert, Button, Chip, CircularProgress, CssBaseline, Dialog, DialogActions, DialogContent, DialogTitle,
   IconButton, Menu, MenuItem, Paper, Popover, Snackbar, TextField, ThemeProvider, Tooltip, createTheme, useMediaQuery,
 } from '@mui/material';
-import { api, dateLabel, errorText, fmt, localDay, monthName, type Account, type Entry, type Preview, type Report, type Row } from './api';
+import { api, dateLabel, errorText, fmt, localDay, monthName, plural, type Account, type Entry, type Preview, type Report, type Row } from './api';
 import { DeleteVehicleDialog, destinationFields, fuelFields, RecordDialog, tripFields, UserDialog, vehicleFields, type Edit } from './forms';
 import { Icon } from './icons';
 import { FuelInvoiceDialog } from './FuelInvoice';
 import { MonthlyWizard } from './MonthlyWizard';
+import { Tour, tourSeen, tourSteps } from './Tour';
 import { nextTheme, themeLabels, useTheme, type ThemeMode, type ThemePref } from './theme';
 import './style.css';
 
@@ -18,7 +19,7 @@ const makeTheme = (mode: ThemeMode) => { const dark = mode==='dark'; return crea
     background:{default:dark?'#161a19':'#f3f5f3',paper:dark?'#202523':'#fff'},text:{primary:dark?'#e6ece8':'#1f2a25',secondary:dark?'#9aa69f':'#5d6b63'},
     ...(dark?{divider:'#353d39'}:{})},
   shape:{borderRadius:10},
-  typography:{fontFamily:'Inter, system-ui, -apple-system, "Segoe UI", sans-serif',button:{textTransform:'none',fontWeight:650}},
+  typography:{fontFamily:'Inter, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',button:{textTransform:'none',fontWeight:650}},
   components:{MuiPaper:{styleOverrides:{root:{backgroundImage:'none'}}},
     MuiButton:{defaultProps:{disableElevation:true}},
     MuiTableCell:{styleOverrides:{head:{fontWeight:700,background:dark?'#1d2220':'#f0f3f1',color:dark?'#b8c2bc':'#4c5a52'}}}},
@@ -152,6 +153,13 @@ type ThemeProps = { themePref: ThemePref; setThemePref: (p: ThemePref) => void }
 function Workspace({account,signOut,themePref,setThemePref}:{account:Account;signOut:()=>void}&ThemeProps) {
   const navigate=useNavigate();
   const location=useLocation();
+  // návod: pri prvom otvorení sám, potom tlačidlom s otáznikom; hodnota je stránka, na ktorú sa po ňom vrátime
+  const [tour,setTour]=useState<string|null>(null);
+  useEffect(()=>{
+    if(tourSeen(account.username))return;
+    const timer=setTimeout(()=>setTour(window.location.pathname.replace(/^\/vehicle-logbook/,'')||'/'),700);
+    return ()=>clearTimeout(timer);
+  },[account.username]);
   const phone=useMediaQuery('(max-width:700px)');
   const [vehicles,setVehicles]=useState<Row[]>([]);
   const [loaded,setLoaded]=useState(false);
@@ -245,7 +253,7 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
     const today=localDay();
     const day=today.startsWith(String(report?.month))?today:String(report?.month)+'-01';
     void api.get(path+'/odometer',{params:{day}}).then(({data})=>{
-      setEdit({...settings,initial:{day,category:'mesto',start_odo:data.odo,odo:data.odo,vat:data.vat}});
+      setEdit({...settings,initial:{day,category:'mesto',start_odo:data.odo,vat:data.vat}});
     }).catch(error=>setProblem(errorText(error)));
   }
   function openRow(kind:'trips'|'fuel',row:Entry) {
@@ -293,7 +301,7 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
 
   const issues=report?.rows.flatMap(row=>row.warnings.map(warning=>dayLabel(row.day)+': '+warning))??[];
   const issuesPanel=issues.length>0&&<Alert severity="warning" icon={<Icon name="alert"/>} className="issues"><details>
-    <summary>{issues.length===1?'1 vec na kontrolu':`${issues.length} veci na kontrolu`} v tomto mesiaci</summary>
+    <summary>{issues.length} {plural(issues.length,'vec','veci','vecí')} na kontrolu v tomto mesiaci</summary>
     <ul>{issues.map((issue,index)=><li key={index}>{issue}</li>)}</ul>
   </details></Alert>;
   const lockedChip=closed&&<Chip size="small" icon={<Icon name="lock" size={14}/>} label="Uzavretý mesiac" className="lock-chip" />;
@@ -327,7 +335,7 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
           {phone?<Tooltip title={descending?'Najnovšie hore':'Najstaršie hore'}><IconButton onClick={()=>setDescending(v=>!v)} aria-label={descending?'Najnovšie hore':'Najstaršie hore'}><Icon name="sort"/></IconButton></Tooltip>
             :<Button size="small" startIcon={<Icon name="sort" size={16}/>} onClick={()=>setDescending(v=>!v)}>{descending?'Najnovšie hore':'Najstaršie hore'}</Button>}
           {lockedChip}
-          <span className="toolbar-sum">{isTrip?<>{all.length} jázd · <b>{fmt(totalKm)} km</b></>:<>{all.length}× · <b>{fmt(totalL)} l</b> · <b>{fmt(totalE)} €</b></>}</span>
+          <span className="toolbar-sum">{isTrip?<>{all.length} {plural(all.length,'jazda','jazdy','jázd')} · <b>{fmt(totalKm)} km</b></>:<>{all.length}× · <b>{fmt(totalL)} l</b> · <b>{fmt(totalE)} €</b></>}</span>
         </div>}
         {issuesPanel}
         {!all.length ? <Empty icon={isTrip?'route':'fuel'} title={isTrip?'V tomto mesiaci zatiaľ nie sú jazdy':'V tomto mesiaci zatiaľ nie je tankovanie'}>
@@ -367,24 +375,26 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
   for(const key of ['opening_liters','opening_odo','opening_net']) total[key]=history[0]?.[key];
   for(const key of ['closing_liters','closing_odo','closing_net']) total[key]=history[11]?.[key];
   const tank=vehicle&&report?Math.max(0,Math.min(100,100*Number(report.closing_liters)/Number(vehicle.capacity))):0;
+  const tankOver=Boolean(vehicle&&report)&&Number(report!.closing_liters)>Number(vehicle!.capacity)*1.03+1e-9&&Number(report!.closing_liters)>Number(vehicle!.capacity)+1;
   const recent=(report?.rows??[]).slice(-6).reverse();
   const wizardAllowed=monthKey(year,month)<=lastFinished;
 
   const home=<>
     <PageTitle title="Prehľad" />
     {gate}{ready&&<>
-      <div className="quick">
+      <div className="quick" data-tour="quick">
         <button type="button" className="quick-tile" disabled={closed} onClick={()=>rowEdit('trips')}><span><Icon name="route" size={22}/></span><b>Pridať jazdu</b><small>Jedna cesta autom</small></button>
         <button type="button" className="quick-tile" disabled={closed} onClick={()=>rowEdit('fuel')}><span><Icon name="fuel" size={22}/></span><b>Pridať tankovanie</b><small>Z bločku</small></button>
         <button type="button" className="quick-tile accent" onClick={()=>navigate('/mesacny-navrh')}><span><Icon name="wand" size={22}/></span><b>Vyplniť celý mesiac</b><small>Bločky + krátky popis, návrh urobí asistent</small></button>
       </div>
       {issuesPanel}
-      <div className="stats">
-        <MetricCard icon="route" label="Najazdené" value={fmt(report.distance)} unit="km" sub={`${fmt(report.trip_count)} jázd`} />
+      <div className="stats" data-tour="stats">
+        <MetricCard icon="route" label="Najazdené" value={fmt(report.distance)} unit="km" sub={`${fmt(report.trip_count)} ${plural(Number(report.trip_count),'jazda','jazdy','jázd')}`} />
         <MetricCard icon="gauge" label="Spotreba" value={fmt(report.consumption)} unit="l" sub={Number(report.distance)?`${fmt(report.average)} l/100 km`:'bez jázd'} />
         <MetricCard icon="money" label="Tankovanie" value={fmt(report.gross)} unit="€" sub={`${fmt(report.purchased)} l`} />
-        <MetricCard icon="fuel" label="V nádrži na konci" value={fmt(report.closing_liters,1)} unit="l" sub={`z ${fmt(vehicle?.capacity)} l`}>
-          <span className="tank"><i style={{width:tank+'%'}}/></span></MetricCard>
+        <MetricCard icon="fuel" label="V nádrži na konci" value={fmt(report.closing_liters,1)} unit="l"
+          sub={tankOver?<span className="stat-sub over">viac ako nádrž ({fmt(vehicle?.capacity)} l) – chýbajú jazdy</span>:`z ${fmt(vehicle?.capacity)} l`}>
+          <span className={'tank'+(tankOver?' over':'')}><i style={{width:tank+'%'}}/></span></MetricCard>
       </div>
       <div className="two-col">
         <Paper variant="outlined" className="panel"><div className="section-heading"><h2>Posledné záznamy</h2>
@@ -504,30 +514,33 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
 
   const initials=(account.name??account.username).split(/\s+/).map(p=>p[0]).join('').slice(0,2).toUpperCase();
   const links=NAV.filter(item=>!item.admin||account.admin);
-  const link=(item:NavItem,short=false)=><NavLink key={item.url} to={item.url} end={item.url==='/'} onClick={()=>setSearch('')}>
+  const startTour=()=>setTour(location.pathname);
+  const link=(item:NavItem,short=false)=><NavLink key={item.url} to={item.url} end={item.url==='/'} data-tour={'nav'+item.url} onClick={()=>setSearch('')}>
     <Icon name={item.icon} size={short?22:17}/><span>{short?item.short??item.label:item.label}</span></NavLink>;
   return <div className={'app'+(phone?' phone':'')}>
     <header className="topbar">
       <NavLink className="brand" to="/" aria-label="Kniha jázd – prehľad"><img src="/vehicle-logbook/kbm-logo.png" alt="KBM"/><span className="brand-divider"/><span>Kniha jázd</span></NavLink>
-      <a href="/" className="portal-link" title="Hlavná stránka portálu KBM" aria-label="Všetky aplikácie"><Icon name="grid" size={17}/><span>Všetky aplikácie</span></a>
+      <a href="/" className="portal-link" data-tour="portal" title="Hlavná stránka portálu KBM" aria-label="Všetky aplikácie"><Icon name="grid" size={17}/><span>Všetky aplikácie</span></a>
       {!phone&&<nav aria-label="Hlavné menu">{links.map(item=>link(item))}</nav>}
       {phone ? <div className="account">
-        <IconButton className="avatar-button" aria-label="Účet a ďalšie stránky" onClick={e=>setMenu(e.currentTarget)}><span className="avatar">{initials}</span></IconButton>
+        <IconButton className="avatar-button" data-tour="account" aria-label="Účet a ďalšie stránky" onClick={e=>setMenu(e.currentTarget)}><span className="avatar">{initials}</span></IconButton>
         <Menu anchorEl={menu} open={Boolean(menu)} onClose={()=>setMenu(null)} anchorOrigin={{vertical:'bottom',horizontal:'right'}} transformOrigin={{vertical:'top',horizontal:'right'}}>
           <MenuItem disabled className="menu-account">{account.name??account.username} · {account.admin?'Správca':'Používateľ'}</MenuItem>
           {links.filter(item=>!item.context).map(item=><MenuItem key={item.url} selected={location.pathname===item.url}
             onClick={()=>{setMenu(null);setSearch('');navigate(item.url);}}><Icon name={item.icon}/>&nbsp;&nbsp;{item.label}</MenuItem>)}
           <MenuItem onClick={()=>setThemePref(nextTheme[themePref])}><Icon name={themePref==='light'?'sun':themePref==='dark'?'moon':'monitor'}/>&nbsp;&nbsp;Vzhľad: {themeLabels[themePref]}</MenuItem>
+          <MenuItem onClick={()=>{setMenu(null);startTour();}}><Icon name="help"/>&nbsp;&nbsp;Návod</MenuItem>
           <MenuItem onClick={signOut}><Icon name="logout"/>&nbsp;&nbsp;Odhlásiť</MenuItem>
         </Menu>
       </div> : <div className="account">
         <ThemeToggle pref={themePref} setPref={setThemePref}/>
+        <Tooltip title="Spustiť návod"><IconButton className="theme-toggle" data-tour="help" aria-label="Návod" onClick={startTour}><Icon name="help"/></IconButton></Tooltip>
         <span className="avatar" title={account.name??account.username}>{initials}</span>
         <span className="account-name">{account.name??account.username}<small>{account.admin?'Správca':'Používateľ'}</small></span>
         <Tooltip title="Odhlásiť"><IconButton className="logout" onClick={signOut} aria-label="Odhlásiť"><Icon name="logout"/></IconButton></Tooltip>
       </div>}
     </header>
-    {current?.context&&vehicles.length>0&&<div className="context-bar">
+    {current?.context&&vehicles.length>0&&<div className="context-bar" data-tour="context">
       <TextField size="small" select value={vehicleId??''} onChange={e=>setVehicleId(Number(e.target.value))} className="vehicle-select"
         slotProps={{htmlInput:{'aria-label':'Vozidlo'},select:phone?{renderValue:value=>String(vehicles.find(v=>v.id===value)?.registration??'')}:undefined}}>
         {vehicles.map(v=><MenuItem value={v.id} key={v.id}><b>{String(v.registration)}</b>&nbsp;<span className="muted">{v.name!==v.registration?String(v.name):''}</span></MenuItem>)}
@@ -555,6 +568,8 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </main>
+    {tour!==null&&<Tour user={account.username} steps={tourSteps(account.admin,phone)} setPage={p=>{setEdit(undefined);navigate(p);}}
+      onClose={()=>{navigate(tour);setTour(null);window.scrollTo(0,0);}}/>}
     {phone&&<nav className="bottom-nav" aria-label="Hlavné menu">{links.filter(item=>item.context).map(item=>link(item,true))}</nav>}
     {edit&&<RecordDialog key={edit.path} edit={edit} close={()=>setEdit(undefined)} done={saved=>{
       if(edit.path==='/vehicles'&&saved?.id)setVehicleId(Number(saved.id));
@@ -585,14 +600,15 @@ function App({ themePref, setThemePref }: ThemeProps) {
   const [problem,setProblem]=useState('');
   useEffect(()=>{
     let active=true;
-    void api.get('/me').then(({data})=>{if(active)setAccount(data);}).catch(()=>{if(active)window.location.assign('/?next=vehicle-logbook');});
+    void api.get('/me').then(({data})=>{if(active)setAccount(data);}).catch(error=>{if(!active)return;if(error.response?.status===403)setProblem(errorText(error));else window.location.assign('/?next=vehicle-logbook');});
     const handle=api.interceptors.response.use(value=>value,error=>{
       if(error.response?.status===401)window.location.assign('/?next=vehicle-logbook');
       return Promise.reject(error);
     });
     return ()=>{active=false;api.interceptors.response.eject(handle);};
   },[]);
-  if (!account) return <div className="spinner full"><CircularProgress /></div>;
+  if (!account) return problem ? <div className="content"><Alert severity="error" action={<Button color="inherit" size="small" href="/">Späť na portál</Button>}>{problem}</Alert></div>
+    : <div className="spinner full"><CircularProgress /></div>;
   return <>{problem&&<Alert severity="error" onClose={()=>setProblem('')}>{problem}</Alert>}
     <Workspace account={account} themePref={themePref} setThemePref={setThemePref} signOut={()=>{
       void fetch('/auth/logout',{method:'POST'}).then(()=>window.location.assign('/')).catch(error=>setProblem(errorText(error)));

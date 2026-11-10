@@ -26,7 +26,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from . import distances, gemini, planner
 from .auth import current_user, db_session
 from .db import Access, AssistantFile, AssistantSession, Audit, Destination, Fuel, Holiday, MonthlyDraft, Trip, Vehicle, now
-from .ledger import ledger, month_of, next_month, rounded
+from .ledger import ledger, month_of, next_month, rounded, tank_tolerance
 
 router = APIRouter(prefix="/api")
 Db = Depends(db_session)
@@ -67,6 +67,9 @@ def sk_day(value):
 
 def km(value):
     return f"{value:,}".replace(",", " ") + " km"
+
+
+NO_DESTINATION = "Doplňte cieľ"   # placeholder of a trip added with „+“ in the month view; cannot be approved
 
 
 def plural(count, one, few, many):
@@ -226,14 +229,14 @@ def norm(vehicle, category):
 
 def history_km(db, vehicle, destination, origin=None):
     """Average length of this vehicle's recorded trips to the destination from the same origin (trips without an
-    origin count too); manual trips are preferred over earlier estimates."""
+    origin count too); manual trips are preferred over earlier estimates (monthly drafts, Excel estimates)."""
     name = planner.normalized(destination or "")
     if not name:
         return None
     start = planner.normalized(origin or distances.HOME)
     rows = cached(db, ("history", vehicle.id), lambda: [
         (planner.normalized(dest), planner.normalized(place or ""), length, draft) for dest, place, length, draft in db.execute(
-            select(Trip.destination, Trip.origin, Trip.end_odo - Trip.start_odo, Trip.draft_id)
+            select(Trip.destination, Trip.origin, Trip.end_odo - Trip.start_odo, Trip.draft_id.is_not(None) | Trip.estimated)
             .where(Trip.vehicle_id == vehicle.id, Trip.destination != "").order_by(Trip.day.desc()).limit(500))])
     same = [(length, draft) for dest, place, length, draft in rows if dest == name and length > 0 and place in ("", start)]
     lengths = [length for length, draft in same if not draft] or [length for length, _ in same]
@@ -245,7 +248,7 @@ def known_km(db, vehicle, state, destination, origin=None):
     (implausibly short entries are skipped), then the Žilina table, then the draft's routes."""
     origin = origin or state.get("origin") or distances.HOME
     recorded = history_km(db, vehicle, destination, origin)
-    if recorded:
+    if recorded and (recorded >= 20 or distances.is_city(destination)):   # same sanity rule as for the catalogue below
         return recorded
     name = planner.normalized(destination or "")
     matches = [item for item in catalogue(db, vehicle) if planner.normalized(item.name) == name
@@ -295,8 +298,8 @@ def saved_rows(db, vehicle, session, state):
 
 
 def existing_text(info, month):
-    return (f"Mesiac {month.month}/{month.year} už obsahuje {info['replaceable']} jázd ({km(info['km'])}) uložených skôr "
-            "ako mesačný odhad. Ak ich chcete nahradiť týmto návrhom, zapnite vľavo voľbu „Nahradiť uložený odhad“. Staré "
+    return (f"Mesiac {month.month}/{month.year} už obsahuje jazdy uložené skôr ako mesačný odhad: {info['replaceable']} "
+            f"({km(info['km'])}). Ak ich chcete nahradiť týmto návrhom, zapnite vľavo voľbu „Nahradiť uložený odhad“. Staré "
             "jazdy sa odstránia až pri schválení výkazu, v tej istej transakcii.")
 
 
@@ -688,11 +691,6 @@ def tank_opening(db, vehicle, month):
     return cached(db, ("opening", vehicle.id, month), compute)
 
 
-def tank_tolerance(vehicle):
-    """How far the ledger lets the tank go below empty or above full before it warns."""
-    return max(D(1), D(vehicle.capacity) * D("0.03"))
-
-
 def planning_rate(vehicle, state):
     """Norm consumption (l/100 km) of the planned trips, weighted by their approximate length."""
     rows = state["trips"] or state["routes"]
@@ -818,6 +816,9 @@ def recalculate(db, vehicle, session, state, fresh=False, balance=True):
         ratio = D(trip["distance"]) / trip["approximate_km"] if trip.get("approximate_km") and trip.get("distance") else D(1)
         trip["warning"] = (f"Vzdialenosť sa líši od odhadu {km(trip['approximate_km'])} o viac ako 30 %."
                            if abs(ratio - 1) > D("0.3") and not trip.get("km_confirmed") else None)
+    unnamed = [t["id"] for t in state["trips"] if not (t.get("destination") or "").strip() or t["destination"] == NO_DESTINATION]
+    if unnamed:
+        problems = problems + [f"Jazdy {', '.join(unnamed)} nemajú cieľ. Doplňte, kam ste išli."]
     if not problems:
         state["fingerprint"] = cached(db, ("fingerprint", vehicle.id), lambda: planner.fingerprint(db, vehicle))
         state["stale"] = False
@@ -1191,7 +1192,7 @@ def auto_plan(db, vehicle, session, state):
         changed, added = build_balanced(db, vehicle, session, state)
     except Problem as problem:
         return [], str(problem)
-    text = (f"Pripravil som návrh {len(state['trips'])} jázd na celý mesiac. Odhady sú označené; konkrétne dni alebo "
+    text = (f"Pripravil som návrh na celý mesiac, počet jázd: {len(state['trips'])}. Odhady sú označené; konkrétne dni alebo "
             "kilometre mi môžete opraviť v chate alebo kliknutím na jazdu.")
     if added:
         text += (f" Aby pred každým tankovaním bola jazda a palivo sa zmestilo do nádrže, pridal som {added} "
@@ -1668,8 +1669,8 @@ def plan(session_id: str, data: PlanIn, db=Db, user=Member):
         return view(db, vehicle, session)
     problems = refresh(db, vehicle, session, state)
     estimated = sum(not t["day_confirmed"] for t in state["trips"])
-    text = (f"Návrh obsahuje {len(state['trips'])} jázd ({km(sum(t['distance'] for t in state['trips']))}). "
-            f"{estimated} dátumov je odhadnutých a vzdialenosti sú dopočítané z tachometra. "
+    text = (f"Návrh obsahuje {len(state['trips'])} {plural(len(state['trips']), 'jazdu', 'jazdy', 'jázd')} ({km(sum(t['distance'] for t in state['trips']))}). "
+            f"Počet odhadnutých dátumov: {estimated}; vzdialenosti sú dopočítané z tachometra. "
             "Konkrétne dni alebo kilometre mi môžete opraviť v chate, napríklad „V Poprade som bol 14. októbra“.")
     say(state, "assistant", text + ("\n" + "\n".join(problems) if problems else "") + "\n"
         + tank_text(tank_balance(db, vehicle, session, state)), changed)
@@ -1759,7 +1760,8 @@ def approve(session_id: str, data: ApproveIn, db=Db, user=Member):
     draft.result = result
     session.result = result
     session.status = "saved"
-    say(state, "assistant", f"Výkaz je uložený: {len(trips)} jázd a {len(fuels)} tankovaní"
+    say(state, "assistant", f"Výkaz je uložený: {len(trips)} {plural(len(trips), 'jazda', 'jazdy', 'jázd')} a {len(fuels)} "
+        f"{plural(len(fuels), 'tankovanie', 'tankovania', 'tankovaní')}"
         + (f", nahradených {len(replaced)} skôr uložených odhadov" if replaced else "") + ". Môžete stiahnuť PDF alebo XLSX.")
     store(session, state, [])
     db.add(Audit(user_id=user.id, vehicle_id=vehicle.id, action="Mesačný sprievodca schválený", data=json_value(dict(

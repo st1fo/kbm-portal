@@ -150,7 +150,7 @@ class AssistantFlowTests(unittest.TestCase):
                                   {"destination": "Poprad", "count": 2, "approximate_km": 110, "category": "mimo mesto", "days": []}])
         self.assertEqual((draft["start_odo"], draft["end_odo"], draft["distance"]), (12240, 13280, 1040))
         self.assertEqual(len(draft["trips"]), 5)
-        self.assertIn("Pripravil som návrh 5 jázd", draft["messages"][-1]["text"])
+        self.assertIn("počet jázd: 5", draft["messages"][-1]["text"])
         # The base is Žilina: the demo catalogue (from Spišská Nová Ves) does not apply, the Žilina table does.
         self.assertEqual(draft["origin"], "Žilina")
         self.assertEqual([r["approximate_km"] for r in draft["routes"]], [490, 280])

@@ -55,8 +55,8 @@ export function FuelInvoiceDialog({ close, done }: { close: () => void; done: (m
         {problem && <Alert severity="error" sx={{ mt: 2 }}>{problem}</Alert>}
         {preview && <section className="invoice-preview">
           <h3>Faktúra {preview.number}{preview.issued && <> · {dateLabel(preview.issued)}</>} · {fmt(preview.total)} €</h3>
-          {preview.already
-            ? <Alert severity="error">Táto faktúra už bola zapísaná{preview.imported_at && <> ({dateLabel(preview.imported_at)})</>}. Druhýkrát sa nezapíše.</Alert>
+          {preview.already && !preview.write
+            ? <Alert severity="info">Táto faktúra už bola zapísaná{preview.imported_at && <> ({dateLabel(preview.imported_at)})</>}. Nič nové v nej nie je.</Alert>
             : <Alert severity={preview.skip ? 'warning' : 'info'}>
               Zapíše sa <b>{preview.write}</b> {plural(preview.write, 'tankovanie', 'tankovania', 'tankovaní')} do {vehicles} {plural(vehicles, 'vozidla', 'vozidiel', 'vozidiel')}.
               {preview.skip > 0 && <> Nezapíše sa <b>{preview.skip}</b> – dôvod je pri každom riadku.</>}
@@ -84,7 +84,7 @@ export function FuelInvoiceDialog({ close, done }: { close: () => void; done: (m
     <DialogActions>
       {result ? <Button variant="contained" onClick={finish}>Hotovo</Button> : <>
         <Button onClick={close} disabled={busy}>Zrušiť</Button>
-        <Button variant="contained" disabled={busy || !preview || preview.already || !preview.write} onClick={() => void send(true)}>
+        <Button variant="contained" disabled={busy || !preview || !preview.write} onClick={() => void send(true)}>
           {preview?.write ? `Zapísať ${preview.write} ${plural(preview.write, 'tankovanie', 'tankovania', 'tankovaní')}` : 'Zapísať'}</Button>
       </>}
     </DialogActions>

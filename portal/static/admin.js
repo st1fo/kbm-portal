@@ -3,6 +3,7 @@
   const $ = id => document.getElementById(id);
   const APPS = { workplan: 'Workplan', 'vehicle-logbook': 'Kniha jázd' };
   const ACTIONS = { 'user.create': 'vytvoril účet', 'user.update': 'upravil účet', 'user.invite': 'poslal nový odkaz na heslo', 'user.delete': 'natrvalo zmazal účet', 'group.create': 'pridal skupinu', 'group.rename': 'premenoval skupinu', 'group.delete': 'zmazal skupinu', 'password.set': 'si nastavil heslo' };
+  const FIELDS = { name: 'meno', username: 'prihlasovacie meno', email: 'e-mail', apps: 'aplikácie', groups: 'skupiny', password: 'heslo', confirm: 'potvrdenie' };
   let users = [], groups = [], settings = { smtp: false }, editing = null;
 
   async function call(path, method = 'GET', data) {
@@ -10,7 +11,7 @@
     let v = null; try { v = await r.json(); } catch { /* prázdna odpoveď */ }
     if (!r.ok) {
       const d = v && v.detail;
-      throw Error(typeof d === 'string' ? d : Array.isArray(d) ? 'Skontrolujte polia: ' + d.map(x => (x.loc || []).slice(-1)[0]).join(', ') : 'Požiadavka sa nepodarila.');
+      throw Error(typeof d === 'string' ? d : Array.isArray(d) ? 'Skontrolujte polia: ' + d.map(x => { const f = (x.loc || []).slice(-1)[0]; return FIELDS[f] || f; }).join(', ') : 'Požiadavka sa nepodarila.');
     }
     return v;
   }
@@ -47,7 +48,7 @@
       el('td', { textContent: u.slug }),
       el('td', {}, ...(u.apps.length ? Object.keys(APPS).filter(a => u.apps.includes(a)).map(a => el('span', { className: 'chip app', textContent: APPS[a] })) : [el('span', { className: 'muted', textContent: 'žiadne' })])),
       el('td', {}, ...(u.groups.length ? u.groups.map(g => el('span', { className: 'chip', textContent: g.name })) : [el('span', { className: 'muted', textContent: '—' })])),
-      el('td', {}, el('span', { className: 'status ' + (u.active ? (u.invite_pending ? 'pending' : 'ok') : 'off'), textContent: !u.active ? 'Neaktívny' : u.invite_pending ? 'Čaká na heslo' : u.admin ? 'Administrátor' : 'Aktívny' })),
+      el('td', {}, el('span', { className: 'status ' + (u.active ? (u.invite_pending ? 'pending' : 'ok') : 'off'), textContent: !u.active ? 'Neaktívny' : u.invite_pending === 'expired' ? 'Pozvánka vypršala' : u.invite_pending ? 'Čaká na heslo' : u.admin ? 'Administrátor' : 'Aktívny' })),
       el('td', { className: 'actions' }, el('button', { className: 'link', textContent: 'Upraviť', onclick: () => openUser(u) })))));
     if (!list.length) $('user-rows').append(el('tr', {}, el('td', { colSpan: 6, className: 'muted', textContent: 'Nikto nezodpovedá hľadaniu.' })));
   }
@@ -71,7 +72,7 @@
     try { await call('/auth/admin/groups/' + g.id, 'PATCH', { name }); await refresh(); } catch (e) { alert(e.message); }
   }
   async function deleteGroup(g) {
-    if (!confirm(`Zmazať skupinu „${g.name}“? ${g.members ? `Jej ${g.members} členov ostane bez tejto skupiny.` : ''}`)) return;
+    if (!confirm(`Zmazať skupinu „${g.name}“? ${g.members ? `Počet ľudí, ktorí o ňu prídu: ${g.members}.` : ''}`)) return;
     try { await call('/auth/admin/groups/' + g.id, 'DELETE'); await refresh(); } catch (e) { alert(e.message); }
   }
 
@@ -181,13 +182,14 @@
         const btn = ev.target.querySelector('button'); btn.disabled = true; msg('invite-error', '');
         try {
           const r = await call('/auth/invite', 'POST', { token, password: f.password.value });
-          await call('/auth/login', 'POST', { username: r.username, password: f.password.value });
+          // heslo je už uložené a odkaz spotrebovaný; ak zlyhá len prihlásenie, človek sa prihlási ručne
+          try { await call('/auth/login', 'POST', { username: r.username, password: f.password.value }); } catch { /* prihlasovací formulár */ }
           location.replace('/');
         } catch (e) { msg('invite-error', e.message); btn.disabled = false; }
       });
     } catch (e) {
       $('invite-title').textContent = 'Odkaz nie je platný';
-      $('invite-text').textContent = e.message;
+      $('invite-text').replaceChildren(e.message + ' Ak ste si heslo už nastavili, ', el('a', { href: '/', className: 'text-link', textContent: 'prihláste sa' }), '.');
       $('invite-form').hidden = true;
     }
   }

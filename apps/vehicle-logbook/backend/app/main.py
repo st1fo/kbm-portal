@@ -465,8 +465,8 @@ def fuel_invoice_import(file: UploadFile=File(),apply: bool=False,expected_diges
         return parsed
     if expected_digest != parsed["digest"]:
         fail("Súbor sa zmenil. Nahrajte faktúru znova.",409)
-    if parsed["already"]:
-        fail(f"Faktúra {parsed['number']} už bola zapísaná.",409)
+    if not parsed["write"]:
+        fail("Z tejto faktúry už nie je čo zapísať.",409)
     by_vehicle = {}
     for card in parsed["cards"]:
         for row in card["rows"]:
@@ -478,9 +478,13 @@ def fuel_invoice_import(file: UploadFile=File(),apply: bool=False,expected_diges
                         note=fuel_invoice.note(parsed,row),measured=None)
             db.add(fuel)
             by_vehicle.setdefault(vehicle.id,[]).append(row["voucher"])
-    db.add(FuelInvoice(number=parsed["number"],supplier=parsed["supplier"],
-                       issued=date.fromisoformat(parsed["issued"]) if parsed["issued"] else None,total=parsed["total"],
-                       written=parsed["write"],skipped=parsed["skip"],imported_by=getattr(user,"display_name",None) or user.username))
+    known = db.get(FuelInvoice,parsed["number"])
+    if known:   # doplnenie skôr preskočených riadkov (napr. vozidlo pribudlo až potom)
+        known.written += parsed["write"]; known.skipped = parsed["skip"]
+    else:
+        db.add(FuelInvoice(number=parsed["number"],supplier=parsed["supplier"],
+                           issued=date.fromisoformat(parsed["issued"]) if parsed["issued"] else None,total=parsed["total"],
+                           written=parsed["write"],skipped=parsed["skip"],imported_by=getattr(user,"display_name",None) or user.username))
     db.flush()
     for vehicle_id,vouchers in by_vehicle.items():
         audit(db,user,"Tankovania z faktúry",vehicle_id,invoice=parsed["number"],vouchers=vouchers)

@@ -25,7 +25,7 @@ Otvorte **http://IP_SERVERA:8090**. Pri prvom zostavení sa sťahujú obrazy a z
 | Florián Žifčák | `florian` | Zamestnanec |
 | Martin Zelenák | `martin` | Zamestnanec |
 
-Možno použiť aj e-mail, napr. `maros@demo.kbm.local`. Všetky štyri účty majú pri prvom vytvorení heslo vypísané skriptom. Každý používateľ si ho môže zmeniť cez ozubené koliesko na hlavnej stránke. Po zmene hesla sa zrušia všetky relácie daného účtu.
+Možno použiť aj e-mail, napr. `maros@demo.kbm.local`. Všetky štyri účty majú pri prvom vytvorení heslo vypísané skriptom. Každý používateľ si ho môže zmeniť tlačidlom **Heslo** na hlavnej stránke. Po zmene hesla sa zrušia všetky relácie daného účtu.
 
 Portál otvára:
 
@@ -37,7 +37,7 @@ Portál otvára:
 
 Portál vytvorí jednu 12-hodinovú reláciu v HttpOnly cookie na rovnakej adrese. Obe API pri každej chránenej požiadavke overia túto reláciu u portálu cez interný servisný kľúč. Heslo sa neposiela do menších aplikácií ani sa neukladá v prehliadači. Ich pôvodné prihlasovacie API sú vypnuté. Odhlásenie z ktorejkoľvek aplikácie zneplatní spoločnú reláciu aj v druhej aplikácii. Už zobrazená stránka v inej karte môže zostať viditeľná, ale ďalšie požiadavky na jej údaje budú zamietnuté.
 
-Na začiatku existujú štyri účty (Maroš je správca). Ďalších ľudí pridáva administrátor v portáli tlačidlom **Správa používateľov** (vpravo hore). Workplan dovolí upraviť úväzok a aktivitu používateľa; Kniha jázd dovolí aktivitu a priradenie vozidiel. Účty sa párujú e-mailom vo Workplane a prihlasovacím menom v Knihe jázd, preto sa e-mail ani prihlasovacie meno po vytvorení nemenia. Bežní používatelia majú v Knihe jázd prístup len k vozidlám, ktoré im správca priradí v Nastaveniach.
+Na začiatku existujú štyri účty (Maroš je správca). Ďalších ľudí pridáva administrátor v portáli tlačidlom **Používatelia** (vpravo hore). Workplan dovolí upraviť úväzok a aktivitu používateľa; Kniha jázd dovolí aktivitu a priradenie vozidiel. Účty sa párujú e-mailom vo Workplane a prihlasovacím menom v Knihe jázd, preto sa e-mail ani prihlasovacie meno po vytvorení nemenia. Bežní používatelia majú v Knihe jázd prístup len k vozidlám, ktoré im správca priradí v Nastaveniach.
 
 ## Správa používateľov, prístupov a skupín
 
@@ -77,13 +77,13 @@ Pri tejto verzii nepoužívajte pôvodné samostatné Compose súbory. Všetko s
 Sprievodca v Knihe jázd (`/vehicle-logbook/mesacny-navrh`) má vľavo živý náhľad rozpracovaného mesiaca a vpravo chat. Na mobile sú to dve záložky.
 
 1. Používateľ nahrá bločky (JPG, PNG, WebP, HEIC, PDF, max. 20 súborov po 8 MB) a opíše mesiac, napríklad „začiatok 12 240 km, koniec 13 280 km, trikrát Košice, dvakrát Poprad“.
-2. Gemini z bločkov prečíta dátum, stanicu, litre, sumu, menu a tachometer. Nečitateľné polia a možné duplicity sa zvýraznia. Až tlačidlo **Potvrdiť bločky** odomkne harmonogram.
+2. Gemini z bločkov prečíta dátum, stanicu, litre, sumu, menu a tachometer. Nečitateľné polia a možné duplicity sa zvýraznia. Harmonogram sa vytvorí sám, len čo je známy začiatok, koniec a ciele; pred schválením treba potvrdiť, že bločky sú skontrolované.
 3. Gemini pochopí opis jázd a backend vypočíta kilometre a tachometre. Musia sedieť mesačný rozdiel aj tankovania so známym tachometrom. Opravy v chate („V Poprade som bol 14. októbra“, „To druhé tankovanie bolo 42 litrov“) sa uplatnia ako povolené operácie nad konkrétnym riadkom.
 4. Koncept sa priebežne ukladá na serveri a prežije obnovenie stránky. Tlačidlo **Schváliť a uložiť výkaz** zapíše jazdy aj tankovania v jednej transakcii. Potom je k dispozícii export PDF a XLSX.
 
 Odhadované jazdy sú vo výkaze označené ako mesačný odhad. Tankovanie bez tachometra na bločku ostane bez tachometra.
 
-Konfigurácia v `.env`, ktorú dostane iba služba `logbook-api`:
+Konfigurácia v `.env`, ktorú dostanú služby `logbook-api` a `workplan-api`:
 
 ```
 GEMINI_API_KEY=...                    # bez kľúča sprievodca funguje s ručným zadávaním
@@ -106,7 +106,7 @@ tailscale funnel status                             # ukáže verejnú adresu
 
 Potom v `.env` nastavte `COOKIE_SECURE=1` a `BIND_ADDRESS=127.0.0.1` a spustite `docker compose up -d --build`. Portál bude dostupný iba cez HTTPS odkaz, priama adresa `http://IP_SERVERA:8090` prestane fungovať. Nginx berie skutočnú IP návštevníka z `X-Forwarded-For`, preto musí port ostať viazaný na `127.0.0.1`.
 
-Pred zdieľaním odkazu si každý zmení počiatočné heslo (ozubené koliesko na hlavnej stránke). Všetky účty majú na začiatku rovnaké `DEMO_PASSWORD`. Ide stále o testovací prototyp; databázy pravidelne zálohujte.
+Pred zdieľaním odkazu si každý zmení počiatočné heslo (tlačidlo **Heslo** na hlavnej stránke). Všetky účty majú na začiatku rovnaké `DEMO_PASSWORD`. Ide stále o testovací prototyp; databázy pravidelne zálohujte.
 
 Vypnutie verejného prístupu: `sudo tailscale funnel --https=443 off`. Pre prístup cez LAN potom vráťte `COOKIE_SECURE=0` a `BIND_ADDRESS=0.0.0.0`.
 
@@ -138,7 +138,7 @@ Skript sa bezpečne opýta na nové heslo a zruší relácie účtu. Existujúcu
 
 ## Overenie balíka
 
-Overené boli zostavenia oboch React aplikácií, desať integračných testov centrálneho prihlásenia a API vrátane exportov a prechod v prehliadači: login → Workplan → portál → Kniha jázd → portál → odhlásenie. Skontrolované bolo aj mobilné rozloženie.
+Overené boli zostavenia oboch React aplikácií, trinásť integračných testov centrálneho prihlásenia a API vrátane exportov a prechod v prehliadači: login → Workplan → portál → Kniha jázd → portál → odhlásenie. Skontrolované bolo aj mobilné rozloženie.
 
 Integračné testy používajú izolované SQLite databázy. Workplan má pôvodnú migráciu určenú pre PostgreSQL. Kompletné spustenie Docker Compose a PostgreSQL migrácie v kontajneroch nebolo v prostredí prípravy možné overiť, pretože tu nebol Docker daemon. Lokálny test prehliadača používal pomocný proxy server s rovnakými cestami; finálny balík používa Nginx z `gateway/nginx.conf`.
 

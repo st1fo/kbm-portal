@@ -137,9 +137,7 @@ def check(db, parsed: dict) -> dict:
         for r in c["rows"]:
             day = date.fromisoformat(r["day"])
             r["warnings"], reason = [], ""
-            if existing:
-                reason = f"Faktúra {parsed['number']} už bola zapísaná."
-            elif not c["plate"]:
+            if not c["plate"]:
                 reason = "Karta nemá ŠPZ, tankovanie sa nedá priradiť k vozidlu."
             elif not v:
                 reason = f"Vozidlo {c['plate']} nie je v Knihe jázd."
@@ -160,7 +158,7 @@ def check(db, parsed: dict) -> dict:
                     (Fuel.note.contains(f"poukážka {r['voucher']}")) | ((Fuel.liters == r["liters"]) & (Fuel.gross == r["gross"]))).limit(1))
                 seen.add(key)
                 if duplicate:
-                    reason = "Rovnaké tankovanie je už v knihe (napr. zadané z bločku)."
+                    reason = "Rovnaké tankovanie je už v knihe (z tejto faktúry alebo z bločku)."
             if v and not reason:
                 want, got = fuel_kind(v.fuel_type), fuel_kind(r["product"])
                 if want and got and want != got:
