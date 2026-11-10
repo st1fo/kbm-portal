@@ -1,4 +1,3 @@
-import os
 import hashlib
 import json
 from uuid import uuid4
@@ -7,7 +6,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 from zipfile import BadZipFile
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Response, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -16,11 +15,11 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 
 from . import assistant, distances, exports, fuel_invoice, importer, planner, purge
-from .auth import COOKIE, DUMMY, administrator, check_password, current_user, db_session, digest, hash_password, login
-from .db import (FuelInvoice, Access, AssistantFile, AssistantSession, Audit, Batch, Closing, Destination, Fuel, Holiday, Login,
-                 MonthlyDraft, Trip, User, Vehicle, now)
+from .auth import administrator, current_user, db_session
+from .db import (FuelInvoice, Access, AssistantFile, AssistantSession, Audit, Batch, Closing, Destination, Fuel, Holiday,
+                 MonthlyDraft, Trip, User, Vehicle)
 from .ledger import events, ledger, month_of, months, next_month, report, rounded
-from .schemas import Credentials, DestinationIn, FuelIn, TripIn, UserIn, VehicleIn, VehicleDelete, MonthlyPlanIn, MonthlyApproval
+from .schemas import DestinationIn, FuelIn, TripIn, UserIn, VehicleIn, VehicleDelete, MonthlyPlanIn, MonthlyApproval
 
 app = FastAPI(title="Kniha jázd", docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(assistant.router)
@@ -81,6 +80,8 @@ def check_day(db,vehicle,day):
     check_open(db,vehicle,day)
     if day < vehicle.start_date:
         fail("Dátum predchádza začiatku evidencie vozidla.")
+    if day > today():   # záznam s dátumom v budúcnosti by zablokoval všetky ďalšie jazdy vozidla
+        fail("Dátum je v budúcnosti.")
 
 def row_for(db,model,vehicle,identifier):
     row = db.get(model,identifier)
@@ -94,27 +95,8 @@ def health(db=Db):
     return {"stav":"ok"}
 
 @app.post("/api/login")
-def sign_in(data: Credentials, response: Response, request: Request, db=Db):
+def sign_in():
     raise HTTPException(410, 'Použite spoločné prihlásenie na hlavnej stránke KBM.')
-    user = db.scalar(select(User).where(User.username == data.username.lower()))
-    valid = check_password(data.password,user.password if user else DUMMY)
-    if not valid or not user or not user.active:
-        fail("Nesprávne meno alebo heslo.",401)
-    old = request.cookies.get(COOKIE)
-    if old:
-        db.execute(delete(Login).where(Login.digest == digest(old)))
-    db.execute(delete(Login).where(Login.expires <= now()))
-    login(db,response,user)
-    return {"username":user.username,"admin":user.admin}
-
-@app.post("/api/logout")
-def sign_out(request: Request, response: Response, db=Db):
-    token = request.cookies.get(COOKIE)
-    if token:
-        db.execute(delete(Login).where(Login.digest == digest(token)))
-        db.commit()
-    response.delete_cookie(COOKIE,path="/api")
-    return {"ok":True}
 
 @app.get("/api/me")
 def me(user=Member):
@@ -425,23 +407,12 @@ def save_user(data: UserIn,identifier: int | None=None,db=Db,user=Admin):
         fail("Zvolené vozidlo neexistuje.")
     values = data.model_dump(exclude={"password","vehicle_ids"})
     values["username"] = data.username.lower()
-    if identifier is None:
-        if not data.password:
-            fail("Zadajte heslo s aspoň 12 znakmi.")
-        row = User(password=hash_password(data.password),**values)
-        db.add(row)
-        db.flush()
-    else:
-        row = db.get(User,identifier)
-        if not row:
-            fail("Používateľ sa nenašiel.",404)
-        for key,value in values.items():
-            setattr(row,key,value)
-        if data.password:
-            row.password = hash_password(data.password)
-        if data.password or not data.active:
-            db.execute(delete(Login).where(Login.user_id == row.id))
-        db.execute(delete(Access).where(Access.user_id == row.id))
+    row = existing
+    if not row:
+        fail("Používateľ sa nenašiel.",404)
+    for key,value in values.items():
+        setattr(row,key,value)
+    db.execute(delete(Access).where(Access.user_id == row.id))
     db.add_all(Access(user_id=row.id,vehicle_id=vehicle_id) for vehicle_id in access)
     audit(db,user,"Používateľ uložený",account=row.id,**values,vehicle_ids=sorted(access))
     db.commit()

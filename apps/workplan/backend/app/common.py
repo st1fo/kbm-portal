@@ -4,11 +4,19 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError
 from .models import User, Holiday, Audit, Setting
 
 TZ=ZoneInfo('Europe/Bratislava')
 def today(): return datetime.now(TZ).date()
+def private_row(obj,user,work_type_ids=None):
+    """Riadok plánu alebo žiadosti pre zoznam, ktorý vidia aj kolegovia: poznámku a dôvod pri cudzej absencii
+    (napr. lekár) vidí iba vlastník a administrátor. Poznámka pri pracovnom dni (work_type_ids) ostáva."""
+    d=row(obj)
+    if user.role!='admin' and obj.user_id!=user.id and (work_type_ids is None or obj.type_id not in work_type_ids):
+        for k in ('note','reason'):
+            if k in d: d[k]=''
+    return d
 def row(obj):
     return {c.name:getattr(obj,c.name) for c in obj.__table__.columns if c.name!='password_hash'}
 def audit(db,user,action,detail): db.add(Audit(actor_id=user.id,action=action,detail=str(detail)[:2000]))
@@ -16,6 +24,8 @@ def commit(db):
     try: db.commit()
     except IntegrityError:
         db.rollback(); raise HTTPException(409,'Záznam koliduje s existujúcimi údajmi. Obnovte stránku.')
+    except DataError:   # napr. nulový znak alebo priveľká hodnota: chyba vstupu, nie pád servera
+        db.rollback(); raise HTTPException(422,'Údaje obsahujú nepovolené znaky alebo hodnoty.')
 def owner(user,uid):
     if user.role!='admin' and user.id!=uid: raise HTTPException(403,'Môžete upravovať iba vlastné údaje.')
 def employee(db,uid):

@@ -56,7 +56,7 @@ def stub_identity(request):
     slug = request.cookies.get("kbm_portal_session")
     if not slug:
         raise HTTPException(401, "Prihláste sa do portálu KBM.")
-    return {"slug": slug, "admin": slug == "maros", "name": "Maroš Sokolák" if slug == "maros" else slug}
+    return {"slug": slug, "admin": slug == "maros", "name": "Maroš Sokolák" if slug == "maros" else slug, "apps": ["vehicle-logbook"]}
 
 
 class ApiError(Exception):
@@ -330,7 +330,7 @@ class AssistantFlowTests(unittest.TestCase):
         finally:
             os.environ["GEMINI_API_KEY"] = "test-key"
         # Invalid structured output is rejected by Pydantic and reported, not applied.
-        FAKE.queue["ReceiptExtraction"].append({"is_receipt": False, "receipts": []})  # pending upload is retried first
+        # the upload that failed is not sent to Gemini again with a chat message (only „Skúsiť znova“ retries it)
         FAKE.queue["ChatResult"].append({"reply": 5, "operations": [{"action": "drop_table"}]})
         draft = self.ok(self.admin.post(f"/api/assistant/{sid}/messages", json={"text": "Test"}))
         self.assertIn("neplatné údaje", draft["error"])

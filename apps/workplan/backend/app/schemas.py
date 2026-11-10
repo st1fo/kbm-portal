@@ -1,9 +1,6 @@
 from datetime import date
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-class Login(BaseModel):
-    email: str
-    password: str
 class Employee(BaseModel):
     name: str = Field(min_length=2,max_length=150)
     email: str = Field(min_length=5,max_length=254,pattern=r'^[^@\s]+@[^@\s]+\.[^@\s]+$')

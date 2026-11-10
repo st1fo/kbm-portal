@@ -16,7 +16,6 @@ cp .env.example .env
 sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 32)/" .env
 docker compose up -d --build
 docker compose ps
-docker compose exec backend python -m app.bootstrap
 ```
 
 Pri prvom štarte backend automaticky spustí migrácie. Počkajte, kým služby v `docker compose ps` zobrazia stav `healthy`. Prvého správcu vytvára posledný príkaz a heslo sa zadáva bez zobrazenia. Nové účty a ich prístup k vozidlám spravuje správca v aplikácii.

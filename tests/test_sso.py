@@ -142,11 +142,11 @@ def test_admin_creates_user_with_app_access_groups_and_invite(services):
         assert {'Vedenie','Vývojári','Predaj','Technici','Administratíva','Brigádnici'}<=set(groups)
         r=admin.post('/auth/admin/users',json={'name':'Jana Nováková','username':'jana','email':'jana@test.local','apps':['vehicle-logbook'],'groups':[groups['Brigádnici']],'send_email':True},headers={'Origin':services['portal']})
         assert r.status_code==200,r.text
-        body=r.json(); assert not body['emailed'] and 'SMTP' in body['email_error'] and '/?invite=' in body['invite_url']
+        body=r.json(); assert not body['emailed'] and 'SMTP' in body['email_error'] and '/#invite=' in body['invite_url']
         token=body['invite_url'].split('invite=')[1]
         assert admin.post('/auth/admin/users',json={'name':'Iná','username':'jana','email':'x@test.local'}).status_code==409
         # pozvánka: nastavenie hesla a prihlásenie
-        assert get(services['portal']+'/auth/invite?token='+token).json()['username']=='jana'
+        assert admin.post('/auth/invite/info',json={'token':token}).json()['username']=='jana'
         assert admin.post('/auth/invite',json={'token':token,'password':'Jana-Heslo-2026!'}).status_code==200
         assert admin.post('/auth/invite',json={'token':token,'password':'Jana-Heslo-2026!'}).status_code==404   # jednorazový
     with client(services) as jana:

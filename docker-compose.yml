@@ -25,6 +25,7 @@ services:
       timeout: 5s
       retries: 20
     restart: unless-stopped
+    security_opt: ['no-new-privileges:true']
   workplan-db:
     image: postgres:16-alpine
     environment:
@@ -39,6 +40,7 @@ services:
       timeout: 5s
       retries: 20
     restart: unless-stopped
+    security_opt: ['no-new-privileges:true']
   logbook-db:
     image: postgres:17-alpine
     environment:
@@ -53,12 +55,12 @@ services:
       timeout: 5s
       retries: 20
     restart: unless-stopped
+    security_opt: ['no-new-privileges:true']
   workplan-api:
     build: ./apps/workplan/backend
     environment:
       <<: *sso
       DATABASE_URL: postgresql+psycopg://workplan:${POSTGRES_PASSWORD}@workplan-db:5432/workplan
-      JWT_SECRET: ${SSO_INTERNAL_KEY}
       TZ: Europe/Bratislava
       # Gemini navrhuje aktivity v Denníku (AI doplnenie dňa); kľúč nejde do prehliadača.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
@@ -74,6 +76,7 @@ services:
       timeout: 5s
       retries: 30
     restart: unless-stopped
+    security_opt: ['no-new-privileges:true']
   logbook-api:
     build: ./apps/vehicle-logbook/backend
     environment:
@@ -95,22 +98,25 @@ services:
       timeout: 5s
       retries: 30
     restart: unless-stopped
+    security_opt: ['no-new-privileges:true']
   workplan-ui:
     build: ./apps/workplan/frontend
     depends_on:
       workplan-api:
         condition: service_healthy
     restart: unless-stopped
+    security_opt: ['no-new-privileges:true']
   logbook-ui:
     build: ./apps/vehicle-logbook/frontend
     depends_on:
       logbook-api:
         condition: service_healthy
     restart: unless-stopped
+    security_opt: ['no-new-privileges:true']
   gateway:
     image: nginx:1.28-alpine
     ports:
-      - '${BIND_ADDRESS:-0.0.0.0}:${PORT:-8090}:80'
+      - '${BIND_ADDRESS:-127.0.0.1}:${PORT:-8090}:80'
     volumes:
       - ./gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
@@ -121,6 +127,7 @@ services:
       portal:
         condition: service_healthy
     restart: unless-stopped
+    security_opt: ['no-new-privileges:true']
 volumes:
   portal_data:
   workplan_data:

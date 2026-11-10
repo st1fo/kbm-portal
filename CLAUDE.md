@@ -54,8 +54,8 @@ browser ─► gateway (nginx, gateway/nginx.conf, only exposed service)
 - The API routes are **not** gated by nginx. Each backend authenticates on its own.
 - Each backend's `app/portal_sso.py` (identical in both apps) forwards the cookie to `SSO_URL/internal/identity` with the `X-SSO-Key: SSO_INTERNAL_KEY` header. This happens on every protected request, through `current_user` in `workplan/backend/app/security.py` and `vehicle-logbook/backend/app/auth.py`.
 - Users are mapped by **email** in Workplan and by **username** (slug) in the logbook; both are immutable in the portal. Workplan updates the local name and role from the portal identity only when they change. `app/portal_init.py` in each backend creates the four seed rows with random unusable passwords. It runs at container start after `alembic upgrade head`; see each backend's Dockerfile CMD.
-- The original login endpoints in both apps are disabled and return 410.
-- The portal and both APIs reject state-changing requests whose `Origin` or `Sec-Fetch-Site` is cross-site, which gives CSRF protection. The portal limits login attempts by `X-Real-IP`, a header nginx overwrites.
+- The original login endpoints in both apps only return 410; the local login code (JWT, local sessions, password checks) is gone. Local password columns hold random unusable filler.
+- The portal and both APIs reject state-changing requests whose `Origin` or `Sec-Fetch-Site` is cross-site, which gives CSRF protection. The portal limits login attempts by `X-Real-IP`, a header nginx overwrites. The gateway also caps requests per address on `/auth/` and both APIs (`limit_req`, 429). Invite/reset links carry the token in the fragment (`/#invite=…`) and the page posts it to `/auth/invite/info`, so it stays out of access logs. Gemini use is throttled per user in memory (`journal_ai.ai_enter` in Workplan, `assistant.spend` in the logbook). Calendar/statistics blank `note`/`reason` of other people's absences for non-admins (`common.private_row`).
 
 Workplan admins can hide pages (Dochádzka/Denník/Prehľad/Žiadosti) per portal group or per person (`app/pages.py`, setting `page_access`; personal setting wins, otherwise union of groups, unconfigured group = all). `current_user` enforces it on the API via `check_request`, and `/api/auth/me` returns `pages` for the menu.
 
@@ -84,4 +84,4 @@ Logbook domain logic sits in `apps/vehicle-logbook/backend/app/`:
 
 `EXCEL_ANALYSIS.md` documents how the original Excel formulas and VBA map onto the app.
 
-Config lives in `.env`: `PORT`, `BIND_ADDRESS`, `COOKIE_SECURE` (set it to 1 only behind HTTPS), `POSTGRES_PASSWORD`, `SSO_INTERNAL_KEY` (also used as Workplan's `JWT_SECRET`), `DEMO_PASSWORD`, and `GEMINI_API_KEY` / `GEMINI_MODEL`. `logbook-api` and `workplan-api` receive the Gemini variables. Backends run with `TZ=Europe/Bratislava`.
+Config lives in `.env`: `PORT`, `BIND_ADDRESS`, `COOKIE_SECURE` (set it to 1 only behind HTTPS), `POSTGRES_PASSWORD`, `SSO_INTERNAL_KEY`, `DEMO_PASSWORD`, and `GEMINI_API_KEY` / `GEMINI_MODEL`. `logbook-api` and `workplan-api` receive the Gemini variables. Backends run with `TZ=Europe/Bratislava`.

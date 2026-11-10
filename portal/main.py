@@ -72,6 +72,8 @@ async def protect(request, call_next):
             return JSONResponse({"detail":"Nepovolený pôvod požiadavky."},status_code=403)
     response=await call_next(request)
     response.headers["Cache-Control"]="no-store"
+    # za HTTPS (COOKIE_SECURE=1) si prehliadač zapamätá, že sem nemá chodiť cez nešifrované http
+    if os.getenv("COOKIE_SECURE","0")=="1": response.headers["Strict-Transport-Security"]="max-age=31536000"
     return response
 
 def groups_of(db, slugs=None):
@@ -111,7 +113,10 @@ def health():
 def limited(request):
     # Nginx overwrites this header; only the gateway is exposed.
     key=request.headers.get("x-real-ip",request.client.host)
-    bucket=ATTEMPTS[key]; now=time.time()
+    now=time.time()
+    if len(ATTEMPTS)>5000:   # tabuľka nesmie rásť donekonečna (každá nová adresa by v nej ostala)
+        for k in [k for k,b in ATTEMPTS.items() if not b or b[-1]<now-60]: del ATTEMPTS[k]
+    bucket=ATTEMPTS[key]
     while bucket and bucket[0]<now-60: bucket.popleft()
     if len(bucket)>=10: raise HTTPException(429,"Príliš veľa pokusov. Skúste o minútu.")
     bucket.append(now)
@@ -142,7 +147,7 @@ def logout(request:Request,response:Response):
     response.delete_cookie(COOKIE,path="/"); return {"ok":True}
 @app.post("/auth/password")
 def password(data:PasswordChange,request:Request,response:Response):
-    user=identity(request)
+    user=identity(request); limited(request)   # ukradnutá relácia nesmie hádať aktuálne heslo bez obmedzenia
     with connect() as db:
         row=db.execute("SELECT password FROM users WHERE slug=?",(user["slug"],)).fetchone()
         if not verify(data.current,row["password"]): raise HTTPException(400,"Aktuálne heslo nie je správne.")
@@ -191,7 +196,7 @@ def invite_mail(user, url, kind):
 def prepare_invite(db, request, slug, kind):
     """Vytvorí odkaz v transakcii; e-mail sa posiela až po commite (send_invite), aby SMTP nedržal zámok DB."""
     user=dict(db.execute("SELECT * FROM users WHERE slug=?",(slug,)).fetchone())
-    return user, f"{base_url(request)}/?invite={new_invite(db, slug, kind)}", kind
+    return user, f"{base_url(request)}/#invite={new_invite(db, slug, kind)}", kind
 def send_invite(prepared, send):
     user,url,kind=prepared
     mail_error=send_mail(user["email"], *invite_mail(user, url, kind)) if send else ""
@@ -201,9 +206,13 @@ def invite_row(db, token):
 class InviteAccept(BaseModel):
     token: str = Field(min_length=20,max_length=100)
     password: str = Field(min_length=12,max_length=256)
-@app.get("/auth/invite")
-def invite_info(token:str):
-    with connect() as db: row=invite_row(db, token)
+class InviteToken(BaseModel):
+    token: str = Field(min_length=20,max_length=100)
+# Token ide v tele požiadavky a v odkaze za mriežkou (#invite=…), aby neostal v logoch brány.
+@app.post("/auth/invite/info")
+def invite_info(data:InviteToken, request:Request):
+    limited(request)
+    with connect() as db: row=invite_row(db, data.token)
     if not row or not row["active"]: raise HTTPException(404,"Odkaz je neplatný alebo vypršal. Požiadajte administrátora o nový.")
     return {"name":row["name"],"username":row["slug"],"kind":row["kind"]}
 @app.post("/auth/invite")
@@ -393,7 +402,7 @@ def admin_settings(request:Request):
 # ---------------------------------------------------------------- interné rozhranie pre aplikácie
 
 def internal_key(request):
-    if not hmac.compare_digest(request.headers.get("x-sso-key",""),os.environ["SSO_INTERNAL_KEY"]): raise HTTPException(403)
+    if not hmac.compare_digest(request.headers.get("x-sso-key","").encode(),os.environ["SSO_INTERNAL_KEY"].encode()): raise HTTPException(403)
 @app.get("/internal/identity")
 def internal(request:Request):
     internal_key(request)

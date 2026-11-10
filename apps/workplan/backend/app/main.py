@@ -1,18 +1,16 @@
-import calendar, csv, io, time
-from collections import defaultdict, deque
-from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
-from fastapi import FastAPI, Depends, HTTPException, Request
+import csv, io
+from collections import defaultdict
+from datetime import date, datetime
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, func, or_
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from openpyxl import Workbook
 from .db import get_db
 from .models import User, AttendanceType, Attendance, LeaveRequest, Holiday, Notification, Audit, Setting
-from .schemas import Login, Employee, TypeInput, Plan, Review, SettingsInput, HolidayInput
-from .security import current_user, admin, token, hasher
-from .common import TZ, today, row, audit, commit, owner, employee, days, month_bounds, get_settings, working_dates, is_work
+from .schemas import Employee, TypeInput, Plan, Review, SettingsInput, HolidayInput
+from .security import current_user, admin
+from .common import TZ, today, row, private_row, audit, commit, owner, employee, month_bounds, get_settings, working_dates, is_work
 from .journal import router as journal_router
 from .boards import router as boards_router
 from .pages import router as pages_router, allowed_pages
@@ -28,7 +26,6 @@ app.include_router(pages_router)
 app.include_router(ai_router)
 app.include_router(hours_router)
 app.include_router(purge_router)
-login_attempts=defaultdict(deque)
 def notify_admins(db,message):
     for uid in db.scalars(select(User.id).where(User.role=='admin',User.active==True)):
         db.add(Notification(user_id=uid,message=message))
@@ -68,18 +65,8 @@ async def portal_csrf(request, call_next):
     return response
 
 @app.post('/api/auth/login')
-def login(p:Login,request:Request,db:Session=Depends(get_db)):
+def login():
     raise HTTPException(410, 'Použite spoločné prihlásenie na hlavnej stránke KBM.')
-    key=request.client.host if request.client else 'unknown'; now=time.monotonic(); bucket=login_attempts[key]
-    while bucket and bucket[0]<now-60: bucket.popleft()
-    if len(bucket)>=20: raise HTTPException(429,'Príliš veľa pokusov. Skúste o minútu.')
-    bucket.append(now)
-    u=db.scalar(select(User).where(User.email==p.email.lower().strip()))
-    try:
-        if not u or not u.active: raise ValueError()
-        hasher.verify(u.password_hash,p.password)
-    except Exception: raise HTTPException(401,'Nesprávny e-mail alebo heslo.')
-    return {'access_token':token(u),'user':row(u)}
 @app.get('/api/auth/me')
 def me(u=Depends(current_user),db:Session=Depends(get_db)): return {**row(u),'pages':allowed_pages(db,u)}
 @app.get('/api/employees')
@@ -92,9 +79,6 @@ def employees(u=Depends(current_user),db:Session=Depends(get_db)):
 @app.post('/api/employees')
 def add_employee(p:Employee,u=Depends(admin),db:Session=Depends(get_db)):
     raise HTTPException(409,'Účty sa pridávajú v portáli KBM (Správa používateľov).')
-    if not p.password: raise HTTPException(422,'Zadajte heslo s aspoň 10 znakmi.')
-    obj=User(**p.model_dump(exclude={'password'}),password_hash=hasher.hash(p.password)); obj.email=obj.email.lower().strip()
-    db.add(obj); audit(db,u,'employee.create',p.email); commit(db); return row(obj)
 @app.put('/api/employees/{uid}')
 def edit_employee(uid:int,p:Employee,u=Depends(admin),db:Session=Depends(get_db)):
     obj=db.get(User,uid)
@@ -122,7 +106,8 @@ def calendar_data(month:str,u=Depends(current_user),db:Session=Depends(get_db)):
     entries=select(Attendance).where(Attendance.date.between(start,end)); pending=select(LeaveRequest).where(LeaveRequest.status=='pending',LeaveRequest.start_date<=end,LeaveRequest.end_date>=start)
     partial=select(LeaveRequest).where(LeaveRequest.status=='approved',LeaveRequest.hours.is_not(None),LeaveRequest.start_date.between(start,end))
     if vis is not None: entries=entries.where(Attendance.user_id.in_(vis)); pending=pending.where(LeaveRequest.user_id.in_(vis)); partial=partial.where(LeaveRequest.user_id.in_(vis))
-    return {'entries':[row(x) for x in db.scalars(entries)], 'requests':[row(x) for x in db.scalars(pending)], 'partial':[row(x) for x in db.scalars(partial)], 'holidays':[row(x) for x in db.scalars(select(Holiday).where(Holiday.date.between(start,end)))], 'settings':get_settings(db)}
+    work={t.id for t in db.scalars(select(AttendanceType)) if is_work(t)}
+    return {'entries':[private_row(x,u,work) for x in db.scalars(entries)], 'requests':[private_row(x,u) for x in db.scalars(pending)], 'partial':[private_row(x,u) for x in db.scalars(partial)], 'holidays':[row(x) for x in db.scalars(select(Holiday).where(Holiday.date.between(start,end)))], 'settings':get_settings(db)}
 @app.post('/api/attendance')
 def save_attendance(p:Plan,u=Depends(current_user),db:Session=Depends(get_db)):
     owner(u,p.user_id); employee(db,p.user_id)
@@ -181,6 +166,7 @@ def cancel_request(rid:int,u=Depends(current_user),db:Session=Depends(get_db)):
     if not r: raise HTTPException(404,'Žiadosť neexistuje.')
     owner(u,r.user_id)
     if r.status=='approved' and u.role!='admin': raise HTTPException(403,'Schválenú žiadosť môže zrušiť administrátor.')
+    if r.status not in ('pending','approved'): raise HTTPException(409,'Žiadosť už bola vybavená.')   # rozhodnutie admina sa neprepisuje
     for e in db.scalars(select(Attendance).where(Attendance.request_id==rid)): db.delete(e)
     db.flush(); r.status='rejected'; r.reason='Zrušené'; r.reviewed_by=u.id; r.reviewed_at=datetime.now(TZ)
     db.add(Notification(user_id=r.user_id,message='Žiadosť bola zrušená.')); audit(db,u,'request.cancel',rid); commit(db); return {'ok':True}
@@ -193,7 +179,7 @@ def statistics(month:str,group:str|None=None,u=Depends(current_user),db:Session=
         if vis is None or e.user_id in vis: counts[db.get(AttendanceType,e.type_id).icon]+=1
     upcoming=select(LeaveRequest).where(LeaveRequest.status=='approved',LeaveRequest.end_date>=today()).order_by(LeaveRequest.start_date).limit(10)
     if vis is not None: upcoming=upcoming.where(LeaveRequest.user_id.in_(vis))
-    return {'employees':len(all_users),'office':counts['Building2'],'home':counts['House'],'vacation':counts['Palmtree'],'absent':sum(v for k,v in counts.items() if k not in ['Building2','House','Palmtree']),'upcoming':[row(x) for x in db.scalars(upcoming)]}
+    return {'employees':len(all_users),'office':counts['Building2'],'home':counts['House'],'vacation':counts['Palmtree'],'absent':sum(v for k,v in counts.items() if k not in ['Building2','House','Palmtree']),'upcoming':[private_row(x,u) for x in db.scalars(upcoming)]}
 @app.get('/api/notifications')
 def notifications(u=Depends(current_user),db:Session=Depends(get_db)):
     return [row(x) for x in db.scalars(select(Notification).where(Notification.user_id==u.id).order_by(Notification.id.desc()).limit(50))]
@@ -239,7 +225,7 @@ def report(start:date,end:date,format:str='csv',user_id:int|None=None,group:str|
             p=plans[d]
             table.append([person.name,d.strftime('%d.%m.%Y'),types[p.type_id] if p else '',p.note])
     if format=='csv':
-        buf=io.StringIO(); csv.writer(buf,delimiter=';').writerows([["'"+v if isinstance(v,str) and v.startswith(('=','+','-','@')) else v for v in r] for r in table]); data=('\ufeff'+buf.getvalue()).encode(); mime='text/csv; charset=utf-8'
+        buf=io.StringIO(); csv.writer(buf,delimiter=';').writerows([["'"+v if isinstance(v,str) and v.lstrip()[:1] in ('=','+','-','@') else v for v in r] for r in table]); data=('\ufeff'+buf.getvalue()).encode(); mime='text/csv; charset=utf-8'
     else:
         wb=Workbook(); ws=wb.active; ws.title='Dochádzka'
         for r in table:

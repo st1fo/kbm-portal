@@ -1,5 +1,4 @@
 import os
-os.environ.setdefault('JWT_SECRET','test-only-secret-with-at-least-32-characters')
 os.environ.setdefault('DEMO_PASSWORD','Demo-test-only-2026')
 import io
 from datetime import date
@@ -11,7 +10,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 from app.db import Base, get_db
 from app.models import User, AttendanceType, Attendance, LeaveRequest
-from app.main import app, login_attempts
+from app.main import app
 from app.security import hasher
 from app import portal_sso
 from openpyxl import load_workbook
@@ -49,7 +48,7 @@ def client(monkeypatch):
             db.commit()
     def override():
         with Session(engine) as db: yield db
-    app.dependency_overrides[get_db]=override;login_attempts.clear()
+    app.dependency_overrides[get_db]=override
     with TestClient(app) as c:yield c
     app.dependency_overrides.clear();engine.dispose()
 def auth(c,i=1):
@@ -106,9 +105,15 @@ def test_leave_approval_and_notifications(client):
     assert client.delete(f'/api/requests/{rid}',headers=admin).status_code==200
     assert not client.get('/api/calendar?month=2026-11',headers=employee).json()['entries']
 
-def test_admin_cannot_approve_own_leave(client):
+def test_admin_own_leave_needs_another_admin_when_there_is_one(client):
+    from app.models import User
     h=auth(client);r=client.post('/api/requests',headers=h,json=plan(user_id=1,type_id=3));rid=r.json()['id']
+    client.get('/api/auth/me',headers=auth(client,2))
+    db=next(client.app.dependency_overrides[get_db]())
+    other=db.query(User).filter_by(email='u2@test.local').one();other.role='admin';db.commit()
     assert client.post(f'/api/requests/{rid}/review',headers=h,json={'status':'approved'}).status_code==403
+    other.role='employee';db.commit()   # jediný administrátor si vlastnú žiadosť vybaví sám
+    assert client.post(f'/api/requests/{rid}/review',headers=h,json={'status':'approved'}).status_code==200
 
 def test_leave_rejection_and_history(client):
     h=auth(client,2);r=client.post('/api/requests',headers=h,json=plan(type_id=3));rid=r.json()['id']

@@ -1,20 +1,10 @@
-import os
-from datetime import datetime, timedelta, timezone
-import jwt
 from argon2 import PasswordHasher
 from fastapi import Depends, HTTPException, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from .db import get_db
-from .models import User
 
+# Prihlasuje spoločný portál; lokálne heslo je iba náhodná nepoužiteľná výplň povinného stĺpca.
 hasher = PasswordHasher()
-SECRET = os.getenv('JWT_SECRET', '')
-if len(SECRET) < 32:
-    raise RuntimeError('Set JWT_SECRET to a random secret of at least 32 characters.')
-bearer = HTTPBearer()
-def token(user):
-    return jwt.encode({'sub': str(user.id), 'iat': datetime.now(timezone.utc), 'exp': datetime.now(timezone.utc)+timedelta(hours=8)}, SECRET, algorithm='HS256')
 def current_user(request: Request, db: Session = Depends(get_db)):
     from .portal_sso import portal_identity, require_app
     from .directory import ensure_user

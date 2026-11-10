@@ -171,7 +171,7 @@
   async function inviteView(token) {
     $('loading').hidden = true; $('invite-view').hidden = false;
     try {
-      const info = await call('/auth/invite?token=' + encodeURIComponent(token));
+      const info = await call('/auth/invite/info', 'POST', { token });
       $('invite-eyebrow').textContent = info.kind === 'invite' ? 'VITAJTE V PORTÁLI KBM' : 'NOVÉ HESLO';
       $('invite-title').textContent = info.kind === 'invite' ? `Dobrý deň, ${info.name.split(' ')[0]}` : 'Nastavte si nové heslo';
       $('invite-text').textContent = `Vaše prihlasovacie meno je ${info.username}. Zvoľte si heslo s aspoň 12 znakmi.`;
@@ -194,7 +194,9 @@
     }
   }
   const params = new URLSearchParams(location.search);
-  if (params.get('invite')) void inviteView(params.get('invite'));
+  // token je za mriežkou (#invite=…), aby sa neposielal na server v adrese; staršie odkazy ho majú za otáznikom
+  const invite = new URLSearchParams(location.hash.slice(1)).get('invite') || params.get('invite');
+  if (invite) { history.replaceState(null, '', '/'); void inviteView(invite); }
   else if (params.has('admin')) {
     // otvoriť správu po načítaní používateľa (napr. odkaz z Workplanu)
     fetch('/auth/me').then(r => r.ok ? r.json() : null).then(u => { if (u?.admin) void openAdmin(false); });

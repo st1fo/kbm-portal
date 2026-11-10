@@ -4,6 +4,8 @@ Postup: GET /ai/day ukáže odpracovaný, zapísaný a voľný čas; POST /ai/pr
 Gemini a vráti skontrolované riadky s upozorneniami; POST /ai/apply zapíše potvrdené riadky v jednej transakcii.
 Gemini nikdy nezapisuje. Časy sú minúty od polnoci daného dňa (≥ 1440 = nasledujúci deň).
 """
+import threading, time
+from collections import defaultdict, deque
 from datetime import date, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -19,6 +21,25 @@ from . import journal_calc as jc
 router = APIRouter(prefix='/api/journal/ai', tags=['journal-ai'])
 HM = r'^([01]\d|2[0-3]):[0-5]\d$'
 MAX_ITEMS = 40
+# AI stojí peniaze a jedno volanie drží vlákno servera až dve minúty: jedno súbežné volanie na človeka a strop za hodinu
+AI_PER_HOUR = 40
+_ai_calls: dict[int, deque] = defaultdict(deque)
+_ai_busy: set[int] = set()
+_ai_lock = threading.Lock()
+
+
+def ai_enter(uid: int):
+    now = time.monotonic()
+    with _ai_lock:
+        calls = _ai_calls[uid]
+        while calls and calls[0] < now - 3600: calls.popleft()
+        if uid in _ai_busy: raise HTTPException(429, 'Predošlá požiadavka na AI ešte beží. Počkajte na odpoveď.')
+        if len(calls) >= AI_PER_HOUR: raise HTTPException(429, 'Priveľa požiadaviek na AI za poslednú hodinu. Skúste to neskôr.')
+        calls.append(now); _ai_busy.add(uid)
+
+
+def ai_leave(uid: int):
+    with _ai_lock: _ai_busy.discard(uid)
 
 
 def hm(m: int) -> str:
@@ -174,10 +195,13 @@ def propose(p: ProposeIn, user_id: int | None = None, u=Depends(current_user), d
     context = {'den': p.date.isoformat(), 'den_v_tyzdni': ['pondelok', 'utorok', 'streda', 'štvrtok', 'piatok', 'sobota', 'nedeľa'][p.date.weekday()],
                'odpracovane': info['worked'], 'uz_zapisane_aktivity': info['logged'], 'volny_cas': info['free'],
                **catalog_for_ai(db), 'rozpracovany_navrh': [i.model_dump() for i in p.draft]}
+    ai_enter(u.id)
     try:
         r = gemini.propose(context, [m.model_dump() for m in p.history], p.message)
     except gemini.AIError as e:
         raise HTTPException(502, str(e))
+    finally:
+        ai_leave(u.id)
     items = []
     for x in r.items[:MAX_ITEMS]:   # nezmyselné časy z modelu zahodíme, zvyšok skontroluje check_items
         try: items.append(ItemIn(**x.model_dump()))

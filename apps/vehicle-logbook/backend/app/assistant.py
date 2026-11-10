@@ -38,6 +38,18 @@ MAX_MESSAGE = 2000
 MAX_MESSAGES = 300
 MAX_TRIPS = 120
 MAX_GEMINI_CALLS = 150
+# The per-draft limit resets with a new draft; this one is per user and day (in memory, enough for one API process).
+MAX_GEMINI_PER_DAY = 300
+_spent = {}
+
+
+def spend(user_id):
+    """Count one Gemini call of the user; refuse when the daily budget is used up."""
+    now = datetime.now().timestamp()
+    calls = _spent[user_id] = [t for t in _spent.get(user_id, []) if t > now - 86400]
+    if len(calls) >= MAX_GEMINI_PER_DAY:
+        raise gemini.AssistantError("Dnešný limit požiadaviek na asistenta je vyčerpaný. Údaje doplňte ručne alebo pokračujte zajtra.")
+    calls.append(now)
 HISTORY = 10
 ALLOWED = {"image/jpeg": "JPG", "image/png": "PNG", "image/webp": "WebP", "image/heic": "HEIC",
            "image/heif": "HEIF", "application/pdf": "PDF"}
@@ -390,11 +402,13 @@ def receipt_checks(db, vehicle, session, state):
     return problems
 
 
-def extract_pending(db, session, state):
-    """Send unprocessed uploads to Gemini. Each processed file is committed so failures keep the draft."""
+def extract_pending(db, session, state, retry=False):
+    """Send unprocessed uploads to Gemini. Each processed file is committed so failures keep the draft.
+    Files that already failed are sent again only on an explicit `retry` (the „Skúsiť znova“ button), not with
+    every chat message: each attempt uploads the whole file to Gemini again."""
     notes, changed = [], []
     for item in state["files"]:
-        if item["status"] not in {"pending", "error"}:
+        if item["status"] != "pending" and not (retry and item["status"] == "error"):
             continue
         stored = db.get(AssistantFile, item["id"])
         if not stored:
@@ -403,6 +417,7 @@ def extract_pending(db, session, state):
         if state["gemini_calls"] >= MAX_GEMINI_CALLS:
             raise gemini.AssistantError("Koncept dosiahol limit volaní Gemini. Zvyšné údaje doplňte ručne.")
         state["gemini_calls"] += 1
+        spend(session.user_id)
         try:
             result = gemini.extract_receipt(stored.data, stored.mime)
         except gemini.AssistantError as error:
@@ -722,6 +737,8 @@ def best_subset(amounts, low, high, target):
     limit = high + max(steps, default=0)
     sums = {0: ()}
     for index, step in enumerate(steps):
+        if len(sums) > 20000:   # absurd inputs (refuels far above the tank) must not eat CPU and memory
+            break
         for total, picked in list(sums.items()):
             if total + step <= limit and total + step not in sums:
                 sums[total + step] = picked + (index,)
@@ -765,7 +782,7 @@ def schedule_for_fuel(db, vehicle, session, state, segments):
             available = level - sum((use(t) for t in dated if previous.isoformat() < t["day"] <= day.isoformat()), D(0))
             # a slightly too full tank (within the ledger's tolerance) is fine, a dry one is not
             low = max(D(0), available + liters - capacity - tank_tolerance(vehicle))
-            high = max(D(0), available)
+            high = max(D(0), min(available, capacity))
             chosen = []
             if pool and day > previous:
                 picked = best_subset([use(t) for t in pool], low, high, min(high, max(low, available - reserve)))
@@ -1220,6 +1237,8 @@ def open_session(vehicle_id: int, data: SessionIn, db=Db, user=Member):
     month = month_of(data.month)
     if month >= month_of(today()):
         fail("Mesačný sprievodca je určený pre skončený mesiac. Vyberte predchádzajúci mesiac.", 409)
+    if next_month(month) <= vehicle.start_date:   # also stops drafts (with uploads) for arbitrary past months
+        fail("Vybraný mesiac predchádza začiatku evidencie vozidla.", 409)
     session = db.scalar(select(AssistantSession).where(AssistantSession.vehicle_id == vehicle_id,
         AssistantSession.user_id == user.id, AssistantSession.month == month))
     if not session:
@@ -1340,7 +1359,7 @@ def extract(session_id: str, db=Db, user=Member):
     require_draft(session)
 
     def work():
-        notes, changed = extract_pending(db, session, state)
+        notes, changed = extract_pending(db, session, state, retry=True)
         planned, plan_text = auto_plan(db, vehicle, session, state)
         refresh(db, vehicle, session, state)
         if plan_text:
@@ -1375,6 +1394,7 @@ def message(session_id: str, data: MessageIn, db=Db, user=Member):
         if state["gemini_calls"] >= MAX_GEMINI_CALLS:
             raise gemini.AssistantError("Koncept dosiahol limit volaní Gemini. Zvyšné údaje upravte ručne v tabuľkách.")
         state["gemini_calls"] += 1
+        spend(session.user_id)
         receipt_checks(db, vehicle, session, state)
         history = [m for m in state["messages"][:-1] if m["role"] in {"user", "assistant"}][-HISTORY:]
         result = gemini.interpret(context(db, vehicle, session, state), history, data.text)

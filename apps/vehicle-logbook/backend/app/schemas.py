@@ -68,10 +68,6 @@ class DestinationIn(BaseModel):
     distance: Annotated[int, Field(gt=0, le=100_000)]
     note: Notes = ""
 
-class Credentials(BaseModel):
-    username: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
-    password: Annotated[str, StringConstraints(min_length=1, max_length=256)]
-
 class UserIn(BaseModel):
     username: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
     password: Annotated[str, StringConstraints(min_length=12, max_length=256)] | None = None

@@ -18,7 +18,7 @@ def portal_identity(request):
 
 def require_app(identity, app):
     """Portál posiela zoznam aplikácií, ku ktorým má človek prístup; bez neho aplikácia odmietne každú požiadavku."""
-    if "apps" in identity and app not in identity["apps"]:
+    if app not in (identity.get("apps") or []):
         raise HTTPException(403, "Nemáte prístup k tejto aplikácii. Požiadajte administrátora portálu.")
 
 
@@ -49,5 +49,5 @@ def check_internal_key(request):
     """Interné volania z portálu (napr. trvalé zmazanie používateľa) musia niesť X-SSO-Key."""
     import hmac
     key = os.environ.get("SSO_INTERNAL_KEY", "")
-    if len(key) < 32 or not hmac.compare_digest(request.headers.get("x-sso-key", ""), key):
+    if len(key) < 32 or not hmac.compare_digest(request.headers.get("x-sso-key", "").encode(), key.encode()):
         raise HTTPException(403, "Neplatný interný kľúč.")

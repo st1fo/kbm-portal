@@ -57,7 +57,6 @@ V čistej databáze nastavte `SEED_DEMO=false`, odstráňte DEMO_PASSWORD a zvo�
 
 ```bash
 docker compose up --build -d
-docker compose exec backend python -m app.create_admin
 ```
 
 Sprievodca vyžiada meno, e-mail a heslo bezpečne v termináli. Referenčné kategórie a sviatky sa inicializujú aj bez demo ľudí. Existujúce používateľské úpravy referenčných údajov sa pri štarte neprepisujú. Nezamieňajte demo databázu s produkčnou; pre produkciu použite samostatný projekt/volume. V administrácii môžete zmeniť heslá alebo deaktivovať demo účty, ak pokračujete v tej istej databáze.

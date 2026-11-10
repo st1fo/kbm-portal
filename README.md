@@ -14,7 +14,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Otvorte **http://IP_SERVERA:8090**. Pri prvom zostavení sa sťahujú obrazy a závislosti; môže trvať niekoľko minút. Na serveri musí byť z vášho počítača dostupný TCP port 8090.
+Otvorte **http://127.0.0.1:8090** na serveri. Pre prístup z iných počítačov v dôveryhodnej sieti nastavte v `.env` `BIND_ADDRESS=0.0.0.0` (potom **http://IP_SERVERA:8090**), pre internet použite tunel nižšie. Pri prvom zostavení sa sťahujú obrazy a závislosti; môže trvať niekoľko minút.
 
 `init.sh` vytvorí `.env` s náhodnými heslami a vypíše počiatočné prihlasovacie heslo. Opakované spustenie existujúci `.env` neprepíše. Na spustenie potrebujete iba Docker, Node ani Python na server zvlášť neinštalujete.
 
@@ -108,7 +108,7 @@ Potom v `.env` nastavte `COOKIE_SECURE=1` a `BIND_ADDRESS=127.0.0.1` a spustite 
 
 Pred zdieľaním odkazu si každý zmení počiatočné heslo (tlačidlo **Heslo** na hlavnej stránke). Všetky účty majú na začiatku rovnaké `DEMO_PASSWORD`. Ide stále o testovací prototyp; databázy pravidelne zálohujte.
 
-Vypnutie verejného prístupu: `sudo tailscale funnel --https=443 off`. Pre prístup cez LAN potom vráťte `COOKIE_SECURE=0` a `BIND_ADDRESS=0.0.0.0`.
+Vypnutie verejného prístupu: `sudo tailscale funnel --https=443 off`. Pre prístup cez LAN potom nastavte `COOKIE_SECURE=0` a `BIND_ADDRESS=0.0.0.0`.
 
 ## Bežné príkazy
 
@@ -126,7 +126,7 @@ docker compose down
 
 Databázy prežijú reštart aj bežné `docker compose down`. Nepoužívajte `down -v`, ak chcete údaje ponechať.
 
-Port upravíte v `.env` cez `PORT=8090`. Predvolené `BIND_ADDRESS=0.0.0.0` umožní testovanie cez IP servera. Pre HTTP testovanie je `COOKIE_SECURE=0`. Pri neskoršom použití HTTPS nastavte `COOKIE_SECURE=1` a zachovajte jednu spoločnú adresu pre portál aj obe aplikácie. Tento balík nie je pripravený ako produkčné nasadenie.
+Port upravíte v `.env` cez `PORT=8090`. Predvolené `BIND_ADDRESS=127.0.0.1` sprístupní portál iba na tomto počítači (a cez tunel); pre testovanie cez IP servera v dôveryhodnej sieti nastavte `BIND_ADDRESS=0.0.0.0`. Pre HTTP testovanie je `COOKIE_SECURE=0`. Pri neskoršom použití HTTPS nastavte `COOKIE_SECURE=1` a zachovajte jednu spoločnú adresu pre portál aj obe aplikácie. Tento balík nie je pripravený ako produkčné nasadenie.
 
 Zmena `DEMO_PASSWORD` v `.env` už vytvorené účty neprehesluje. Pri zabudnutom hesle:
 

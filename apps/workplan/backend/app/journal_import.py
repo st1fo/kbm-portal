@@ -128,6 +128,10 @@ def normalize(payload, n: datetime) -> dict:
     for k, r in attendance.items():
         rec = to_seg_rec(r)
         if rec: days[k] = rec
+    # strop veľkosti: bez neho by jeden súbor zamestnal server na minúty a zaplnil spoločný katalóg
+    for key, limit, label in (('projects', 2000, 'projektov'), ('tasks', 5000, 'úloh'), ('todos', 5000, 'to-do položiek'), ('activities', 30000, 'aktivít')):
+        if isinstance(s.get(key), list) and len(s[key]) > limit: raise HTTPException(422, f'Záloha obsahuje priveľa {label} (najviac {limit}).')
+    if len(days) > 4000: raise HTTPException(422, 'Záloha obsahuje priveľa dní dochádzky.')
     return {'attendance': days, 'projects': [p for p in s.get('projects') or [] if isinstance(p, dict)],
             'tasks': [t for t in s.get('tasks') or [] if isinstance(t, dict)],
             'activities': [a for a in s.get('activities') or [] if isinstance(a, dict)],
@@ -319,9 +323,12 @@ def run_import(db, u, payload, dry_run: bool) -> dict:
     for name in [p.get('customer') for p in state['projects']] + [t.get('customer') for t in state['tasks'] + state['todos'] if not t.get('projectId')]:
         imp.customer(name)
     project_ids = imp.projects(state['projects'])
-    sample_tasks = {a.get('taskId') for a in state['activities'] if text_of(a.get('text'), 5000) == SAMPLE_ACTIVITY}
-    sample_tasks = {tid for tid in sample_tasks if tid and not any(a.get('taskId') == tid and text_of(a.get('text'), 5000) != SAMPLE_ACTIVITY for a in state['activities'])
-                    and any(t.get('id') == tid and t.get('name') == 'Príklad: prevzatie serverov' for t in state['tasks'])}
+    def ids(items, key, keep):   # iba hashovateľné identifikátory; množiny namiesto vnorených prechodov (rýchlosť)
+        return {x.get(key) for x in items if isinstance(x.get(key), (str, int)) and keep(x)}
+    is_sample = lambda a: text_of(a.get('text'), 5000) == SAMPLE_ACTIVITY
+    sample_tasks = (ids(state['activities'], 'taskId', is_sample) - ids(state['activities'], 'taskId', lambda a: not is_sample(a))) \
+        & ids(state['tasks'], 'id', lambda t: t.get('name') == 'Príklad: prevzatie serverov')
+    sample_tasks.discard(''); sample_tasks.discard(0)
     task_ids = imp.tasks(state['tasks'], project_ids, sample_tasks)
     imp.activities(state['activities'], task_ids)
     imp.todos(state['todos'], project_ids)

@@ -27,7 +27,7 @@ def stub_identity(request):
     slug = request.cookies.get("kbm_portal_session")
     if not slug:
         raise HTTPException(401, "Prihláste sa do portálu KBM.")
-    return {"slug": slug, "admin": slug == ADMIN["username"], "name": slug}
+    return {"slug": slug, "admin": slug == ADMIN["username"], "name": slug, "apps": ["vehicle-logbook"]}
 
 
 def member(username, *vehicle_ids):
