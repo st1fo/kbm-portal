@@ -22,16 +22,17 @@ type Draft = { id:string; status:'draft'|'saved'; version:number; month:string; 
   can_approve:boolean; origin:string; replace_existing:boolean;
   existing:{replaceable:number; manual:number; km:number; manual_km:number};
   saved:{km:number; trips:SavedTrip[]; fuels:SavedFuel[]};
-  tank:{opening:string; purchased:string; closing:string; planned:boolean; days:Record<string,string>; warnings:string[]}|null;
+  tank:{opening:string; purchased:string; closing:string; planned:boolean; days:Record<string,string>; warnings:string[];
+    rows:Record<string,{before:string; after:string; used:string|null; per100?:string|null; km?:number; window?:string}>}|null;
   assistant:{configured:boolean; model:string}; limits:{file_mb:number; files:number; message:number; types:string[]} };
 type Operation = Record<string, string | number | boolean | string[] | null | undefined> & { action:string };
 
 const receiptLabels: Record<string,string> = { day:'dátum', liters:'litre', gross:'suma', currency:'mena', station:'stanica', odo:'tachometer' };
 
 /** Editable field in the row dialog: saves on blur or Enter, shows the server value otherwise. */
-function Cell({ value, onSave, type='text', error, label, disabled, select, children, helper }:
+function Cell({ value, onSave, type='text', error, label, disabled, select, children, helper, onType }:
   { value:string|number|null|undefined; onSave:(text:string)=>void; type?:string; error?:boolean; label:string;
-    disabled?:boolean; select?:boolean; children?:ReactNode; helper?:string }) {
+    disabled?:boolean; select?:boolean; children?:ReactNode; helper?:string; onType?:(text:string)=>void }) {
   const current = value == null ? '' : String(value);
   const [text, setText] = useState(current);
   useEffect(() => setText(current), [current]);
@@ -39,7 +40,7 @@ function Cell({ value, onSave, type='text', error, label, disabled, select, chil
   return <TextField size="small" fullWidth type={type} value={text} error={error} disabled={disabled} select={select}
     label={label} helperText={helper} placeholder={error ? 'doplniť' : ''}
     slotProps={{ htmlInput: { step: 'any' }, inputLabel: type === 'date' ? { shrink: true } : undefined }}
-    onChange={event => { setText(event.target.value); if (select) commit(event.target.value); }}
+    onChange={event => { setText(event.target.value); onType?.(event.target.value); if (select) commit(event.target.value); }}
     onBlur={() => { if (!select) commit(); }}
     onKeyDown={event => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur(); }}>{children}</TextField>;
 }
@@ -59,6 +60,8 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
   const [preview, setPreview] = useState<FileItem>();
   const [confirm, setConfirm] = useState<{ text:string; run:()=>Promise<void> }>();
   const [editing, setEditing] = useState<{ kind:'trip'|'receipt'; id:string }>();
+  const [kmDraft, setKmDraft] = useState<string>();   // kilometre práve písané v okne jazdy (živý prepočet nádrže)
+  useEffect(() => setKmDraft(undefined), [editing?.id]);
   const [adding, setAdding] = useState<{ anchor:HTMLElement; day:string }>();
   const [checked, setChecked] = useState(false);
   const mobile = useMediaQuery('(max-width:900px)');
@@ -172,6 +175,34 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
   const close = draft.closing;
   const bookFuel = saved ? [] : draft.saved.fuels;
   const issues = [...draft.receipt_problems, ...draft.problems, ...(draft.tank?.warnings ?? [])];
+  // spotreba jazdy podľa normy vozidla (ako stĺpec spotreby v pôvodnom Exceli)
+  /** Spotreba jazdy a stav nádrže po nej a na konci dňa; počas písania kilometrov orientačný prepočet. */
+  const fuelInfo = (item: Trip) => {
+    const row = draft.tank?.rows[item.id], end = draft.tank?.days[item.day];
+    if (!draft.tank?.planned || !row || row.used == null) return null;
+    const rate = Number(item.category === 'mesto' ? vehicle.city_rate : vehicle.outside_rate);
+    const typed = kmDraft != null && kmDraft.trim() !== '' && Number(kmDraft) >= 0 ? Number(kmDraft) : null;
+    const change = typed == null ? 0 : typed * rate / 100 - Number(row.used);
+    const value = (base: string | number | undefined) => fmt(Number(base ?? 0) - change, 1) + ' l';
+    const window = row.window ? draft.tank.rows[row.window] : undefined;
+    const refuel = row.window ? Number(draft.receipts.find(r => r.id === row.window)?.liters ?? draft.saved.fuels.find(f => f.key === row.window)?.liters ?? 0) : 0;
+    const windowKm = window?.km != null ? window.km + (typed == null ? 0 : typed - item.distance) : null;
+    return <div className={'trip-fuel' + (typed != null && typed !== item.distance ? ' typed' : '')}>
+      {windowKm != null && windowKm > 0 && refuel > 0
+        ? <div><span>Priemer medzi tankovaniami</span><b>{fmt(refuel * 100 / windowKm, 1)} l/100 km</b><small>{fmt(windowKm, 0)} km, {fmt(refuel, 1)} l</small></div>
+        : <div><span>Priemer medzi tankovaniami</span><small>po tejto jazde už v mesiaci nie je tankovanie</small></div>}
+      <div><span>Spotreba podľa normy</span><b>{fmt(Number(row.used) + change, 1)} l</b><small>{fmt(rate, 1)} l/100 km</small></div>
+      <div><span>V nádrži po jazde</span><b>{value(row.after)}</b></div>
+      <div><span>Na konci dňa</span><b>{value(end)}</b></div>
+      {typed != null && typed !== item.distance && <small className="muted">Orientačne pri {fmt(typed, 0)} km. Po uložení sa prepočítajú aj ďalšie dni;
+        kilometre ostatných jázd sa upravia tak, aby súčet sedel s tachometrom.</small>}
+    </div>;
+  };
+  const used = (id: string) => draft.tank?.rows[id]?.per100 != null
+    ? <span className="md-fuel" title="Priemerná spotreba medzi tankovaniami"> · {fmt(draft.tank.rows[id].per100, 1)} l/100 km</span> : null;
+  /** Pri tankovaní: koľko km sa prešlo od predošlého tankovania a priemer na 100 km. */
+  const sinceRefuel = (id: string) => { const row = draft.tank?.rows[id];
+    return row?.per100 != null ? <small className="md-per100"> · {fmt(row.km, 0)} km od predošlého · <b>{fmt(row.per100, 1)} l/100 km</b></small> : null; };
   const undated = draft.receipts.filter(receipt => !receipt.day);
   const trip = editing?.kind === 'trip' ? draft.trips.find(item => item.id === editing.id) : undefined;
   const receipt = editing?.kind === 'receipt' ? draft.receipts.find(item => item.id === editing.id) : undefined;
@@ -191,7 +222,7 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
     onClick={() => setEditing({ kind: 'receipt', id: item.id })}>
     <span className="md-icon" aria-hidden>⛽</span>
     <span className="md-main">{item.liters ? fmt(item.liters, 2) + ' l' : 'litre ?'} · {item.gross ? fmt(item.gross, 2) + ' €' : 'suma ?'}
-      {item.station && <small> · {item.station}</small>}</span>
+      {item.station && <small> · {item.station}</small>}{sinceRefuel(item.id)}</span>
     <span className="md-tags"><span className="md-tag">bloček {item.id}</span>
       {item.missing.length > 0 && <span className="md-tag bad">doplniť</span>}
       {item.duplicate && !item.duplicate_ok && <span className="md-tag bad">možná duplicita</span>}</span>
@@ -267,6 +298,7 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
       {!saved && issues.length > 0 && <Alert severity="warning" sx={{ mt: 1 }}><b>Treba skontrolovať</b>
         <ul className="tight">{issues.map(item => <li key={item}>{item}</li>)}</ul></Alert>}
       {undated.length > 0 && <div className="md-undated"><b>Bločky bez dátumu:</b> {undated.map(receiptButton)}</div>}
+      {draft.tank?.planned && <div className="md-head" aria-hidden><span>Deň</span><span>Jazdy a tankovania</span><span>Nádrž večer</span><span/></div>}
       <ol className="month-days">{draft.days.map(info => {
         const date = new Date(info.day + 'T12:00:00');
         const fuels = draft.receipts.filter(item => item.day === info.day);
@@ -284,13 +316,13 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
           <div className="md-items">
             {rows.map(({ item, book }) => book
               ? <div key={book.key} className="md-item trip book">
-                <span className="md-main"><b>{book.destination || 'jazda'}</b> · {fmt(book.distance, 0)} km
+                <span className="md-main"><b>{book.destination || 'jazda'}</b> · {fmt(book.distance, 0)} km{used(book.key)}
                   <small> · {fmt(book.start_odo, 0)} → {fmt(book.end_odo, 0)}</small></span>
                 <span className="md-tags"><span className="md-tag book">v knihe</span></span></div>
               : item && <button key={rowKey(item.id)} type="button" disabled={locked}
                 className={'md-item trip' + (lit.has(item.id) ? ' changed' : '') + (item.warning ? ' warn' : '')}
                 onClick={() => setEditing({ kind: 'trip', id: item.id })}>
-                <span className="md-main"><b>{item.destination}</b> · {fmt(item.distance, 0)} km
+                <span className="md-main"><b>{item.destination}</b> · {fmt(item.distance, 0)} km{used(item.id)}
                   <small> · {fmt(item.start_odo, 0)} → {fmt(item.end_odo, 0)}</small></span>
                 <span className="md-tags">
                   <span className={'md-tag' + (item.day_confirmed && item.km_confirmed ? ' sure' : '')}>
@@ -299,12 +331,12 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
               </button>)}
             {books.map(item => <div key={item.key} className="md-item fuel book">
               <span className="md-icon" aria-hidden>⛽</span>
-              <span className="md-main">{fmt(item.liters, 2)} l · {fmt(item.gross, 2)} €<small> · {item.station}</small></span>
+              <span className="md-main">{fmt(item.liters, 2)} l · {fmt(item.gross, 2)} €<small> · {item.station}</small>{sinceRefuel(item.key)}</span>
               <span className="md-tags"><Tooltip title={item.note || 'kniha jázd'}><span className="md-tag book">v knihe</span></Tooltip></span></div>)}
             {fuels.map(receiptButton)}
             {empty && <span className="md-none">{note || '–'}</span>}
           </div>
-          <div className="md-tank">{draft.tank?.planned && !info.before_start && !info.after_reading ? fmt(level, 0) + ' l' : ''}</div>
+          <div className="md-tank" title="V nádrži na konci dňa (podľa normy)">{draft.tank?.planned && !info.before_start && !info.after_reading ? fmt(level, 1) + ' l' : ''}</div>
           <div className="md-add">{!saved && !info.before_start && !info.after_reading && <IconButton size="small" disabled={locked}
             aria-label={'Pridať k ' + date.getDate() + '. ' + (date.getMonth() + 1) + '.'} onClick={event => setAdding({ anchor: event.currentTarget, day: info.day })}>+</IconButton>}</div>
         </li>;
@@ -346,8 +378,10 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
           <Cell label="Účel" value={trip.purpose} disabled={locked} onSave={value => void tripEdit(trip, 'purpose', value)} />
           <Cell label="Typ" select value={trip.category} disabled={locked} onSave={value => void tripEdit(trip, 'category', value)}>
             <MenuItem value="mesto">mesto</MenuItem><MenuItem value="mimo mesto">mimo mesta</MenuItem></Cell>
-          <Cell label="Kilometre" type="number" value={trip.distance} disabled={locked} onSave={value => void tripEdit(trip, 'km', value)}
+          <Cell label="Kilometre" type="number" value={trip.distance} disabled={locked} onSave={value => { setKmDraft(undefined); void tripEdit(trip, 'km', value); }}
+            onType={setKmDraft}
             helper={trip.km_confirmed ? 'potvrdené vami – vymažte, ak ich má dopočítať systém' : 'dopočítané z tachometra; zadajte, ak ich poznáte'} />
+          {fuelInfo(trip)}
           <p className="muted">Tachometer {fmt(trip.start_odo, 0)} → {fmt(trip.end_odo, 0)} km · {trip.day_confirmed ? 'dátum potvrdený' : 'dátum odhadnutý'}</p>
           {trip.warning && <Alert severity="warning">{trip.warning}</Alert>}
         </DialogContent>

@@ -91,7 +91,32 @@ def ledger(db, vehicle):
                        source="Bloček zo sprievodcu" if event.draft_id else "Zadaný doklad", **fuel_values(event))
         row.update(end_odo=odo, end_liters=liters, end_net=net)
         output.append(row)
+    per_refuel(output)
     return output
+
+def per_refuel(rows):
+    """l/100 km from refuel to refuel (full-tank method): a refuel's litres over the km driven since the previous one.
+    The trips of that window and the refuel get the same `per100`. Trips not closed by a refuel yet (after the last one,
+    or before the first) borrow the nearest known average with `per100_estimate`, until the next refuel settles them."""
+    window, seen, closed = [], False, []
+    for row in rows:
+        row["per100"], row["per100_estimate"] = None, False
+        if row["type"] == "trip":
+            window.append(row)
+            continue
+        km = sum(r["distance"] for r in window)
+        if seen and km > 0:
+            row["per100"] = rounded(row["purchased"] * 100 / km)
+            row["window_km"] = km
+            for trip in window:
+                trip["per100"] = row["per100"]
+            closed.append(row["per100"])
+        seen, window = True, []
+    if closed:
+        tail = {id(row) for row in window}
+        for row in rows:
+            if row["type"] == "trip" and row["per100"] is None:
+                row["per100"], row["per100_estimate"] = closed[-1] if id(row) in tail else closed[0], True
 
 def report(vehicle, rows, month):
     start, stop = month.isoformat(), next_month(month).isoformat()
@@ -126,6 +151,11 @@ def months(db, vehicle, year):
     data = ledger(db, vehicle)
     snapshots = {c.month: c.snapshot for c in db.scalars(select(Closing).where(
         Closing.vehicle_id == vehicle.id, Closing.month >= date(year, 1, 1), Closing.month <= date(year, 12, 1)))}
+    # a closed month keeps its snapshot, but the refuel-to-refuel average stays live (a later refuel settles it)
+    live = {(r["type"], r["id"]): r for r in data}
+    for snapshot in snapshots.values():
+        snapshot["rows"] = [{**row, **{key: live[row["type"], row["id"]].get(key) for key in ("per100", "per100_estimate", "window_km")}}
+                            if (row.get("type"), row.get("id")) in live else row for row in snapshot.get("rows", [])]
     result = []
     for number in range(1, 13):
         month = date(year, number, 1)

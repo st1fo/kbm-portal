@@ -18,7 +18,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
-from reportlab.platypus import KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 # Column catalogue of the monthly report rows (also used for annual totals in main.annual).
 REPORT = {
@@ -43,6 +43,9 @@ MONTHS = ["január", "február", "marec", "apríl", "máj", "jún", "júl", "aug
 PLACES = {"Žilina": "V Žiline", "Bratislava": "V Bratislave", "Košice": "V Košiciach", "Martin": "V Martine",
           "Trenčín": "V Trenčíne", "Poprad": "V Poprade", "Prešov": "V Prešove", "Nitra": "V Nitre"}
 ESTIMATE = "* jazda doplnená z mesačného odhadu"
+# Hlavička výkazov (ako v pôvodnom zošite): logo a firma; dá sa zmeniť premennou REPORT_COMPANY.
+COMPANY = os.getenv("REPORT_COMPANY", "KBM, s.r.o., Žitná 13, 01001 Žilina")
+LOGO = Path(__file__).with_name("assets") / "kbm-logo.png"
 
 D = Decimal
 
@@ -181,15 +184,33 @@ def numbered_canvas(title):
             super().save()
 
         def header(self, total):
-            left, top, height = 15 * mm, A4[1] - 15 * mm, 13 * mm
-            pager = 30 * mm
+            left, top, height = 15 * mm, A4[1] - 15 * mm, 15 * mm
+            pager, brand = 30 * mm, 50 * mm
             self.setStrokeColor(INK)
             self.setLineWidth(1)
             self.rect(left, top - height, WIDTH, height)
+            self.line(left + brand, top, left + brand, top - height)
             self.line(left + WIDTH - pager, top, left + WIDTH - pager, top - height)
+            # firma vľavo: logo KBM a adresa
+            parts = COMPANY.split(", ")   # „KBM, s.r.o.“ / ulica / mesto
+            name, street, town = (", ".join(parts[:-2]), parts[-2], parts[-1]) if len(parts) >= 3 else (COMPANY, "", "")
+            text_left = left + 3 * mm
+            if LOGO.exists():
+                self.drawImage(str(LOGO), left + 2.5 * mm, top - height + 2 * mm, width=8.8 * mm, height=11 * mm,
+                               preserveAspectRatio=True, mask="auto")
+                text_left = left + 13.5 * mm
             self.setFillColor(INK)
-            self.setFont("Report-Bold", 12.5)
-            self.drawCentredString(left + (WIDTH - pager) / 2, top - height / 2 - 4, title)
+            self.setFont("Report-Bold", 9)
+            self.drawString(text_left, top - 6.3 * mm, name)
+            self.setFont("Report", 7.5)
+            self.drawString(text_left, top - 9.6 * mm, street)
+            self.drawString(text_left, top - 12.6 * mm, town)
+            # názov výkazu: zmenší sa, ak by sa nezmestil medzi firmu a číslo strany
+            space, size = WIDTH - pager - brand - 6 * mm, 12.5
+            while size > 8 and pdfmetrics.stringWidth(title, "Report-Bold", size) > space:
+                size -= 0.5
+            self.setFont("Report-Bold", size)
+            self.drawCentredString(left + brand + (WIDTH - pager - brand) / 2, top - height / 2 - 4, title)
             self.setFont("Report", 8.5)
             self.drawCentredString(left + WIDTH - pager / 2, top - height / 2 - 3, f"Strana {self._pageNumber} z {total}")
     return Numbered
@@ -281,26 +302,6 @@ def months_block(context):
                  ("LINEABOVE", (0, -1), (-1, -1), 1, INK), repeat=1, padding=1.8)
 
 
-def trips_block(context, style):
-    data = [["P.č.", "Dátum", "Odkiaľ", "Cieľ", "Typ", "Tach. od", "Tach. do", "Km", "Spotr. (l)"]]
-    distance, consumed, estimated = 0, D(0), False
-    for index, row in enumerate(context["trips"], 1):
-        mark = " *" if row.get("estimated") else ""
-        estimated |= bool(mark)
-        distance += row["distance"]
-        consumed += dec(row["consumed"])
-        data.append([f"{index}.", sk_date(row["day"]) + mark, Paragraph(escape(row.get("origin") or ""), style["cell"]),
-                     Paragraph(escape(row.get("destination") or ""), style["cell"]),
-                     "mesto" if row.get("category") == "mesto" else "mimo mesta",
-                     number(row["start_odo"], 0), number(row["end_odo"], 0), number(row["distance"], 0), number(row["consumed"])])
-    data.append(["SPOLU", "", "", "", "", "", "", number(distance, 0), number(consumed)])
-    result = table(data, [9, 21, 27, 37, 21, 17, 17, 13, 18], ("SPAN", (0, -1), (6, -1)),
-                   ("ALIGN", (5, 1), (-1, -1), "RIGHT"), ("ALIGN", (0, 1), (1, -2), "CENTER"),
-                   ("BACKGROUND", (0, -1), (-1, -1), HEAD), ("FONTNAME", (0, -1), (-1, -1), "Report-Bold"),
-                   ("LINEABOVE", (0, -1), (-1, -1), 1, INK), repeat=1)
-    return result, estimated
-
-
 def signature_block(context, style):
     data = [[f"{place_phrase(context['place'])} dňa:", sk_date(context["day"]), "Vypracoval:",
              Paragraph(f"<b>{escape(context['author'])}</b>", style["sign"]), "Podpis:", ""]]
@@ -320,7 +321,7 @@ def pdf(context):
     title = ("Mesačný" if monthly else "Ročný") + " výkaz spotreby PHM motorového vozidla"
     buffer = BytesIO()
     document = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=15 * mm - 6, rightMargin=15 * mm - 6,
-                                 topMargin=32 * mm, bottomMargin=12 * mm, title=f"{title} · {context['vehicle'].registration} · {period_name(context)}",
+                                 topMargin=34 * mm, bottomMargin=12 * mm, title=f"{title} · {context['vehicle'].registration} · {period_name(context)}",
                                  author=context["author"])
     gap = Spacer(1, (4 if monthly else 3) * mm)
     content = [info_block(context, style), gap, odometer_block(context), gap, settlement_block(context), gap,
@@ -330,13 +331,6 @@ def pdf(context):
     else:
         content += [gap, norm_block(context), gap, Paragraph("Prehľad po mesiacoch", style["section"]), months_block(context)]
     content.append(signature_block(context, style))
-    if monthly and context["trips"]:
-        trips, estimated = trips_block(context, style)
-        content += [PageBreak(), Paragraph(f"Kniha jázd · {period_name(context)} · {escape(context['vehicle'].registration)}",
-                                           style["section"]), trips]
-        if estimated:
-            content.append(Paragraph(ESTIMATE, style["small"]))
-        content.append(signature_block(context, style))
     document.build(content, canvasmaker=numbered_canvas(title))
     return buffer.getvalue()
 
@@ -391,6 +385,13 @@ def page_setup(sheet, last_row, last_col, repeat=None):
 def sheet_title(book, sheet, row, text, last_col):
     sheet.set_row(row, 30)
     sheet.merge_range(row, 0, row, last_col, text, book.fmt(bold=True, font_size=13, align="center", border=2))
+    brand(sheet, row)
+
+
+def brand(sheet, row):
+    """Logo KBM v ľavom rohu nadpisu (ako v pôvodnom zošite)."""
+    if LOGO.exists():
+        sheet.insert_image(row, 0, str(LOGO), {"x_scale": 0.42, "y_scale": 0.42, "x_offset": 4, "y_offset": 2, "object_position": 3})
 
 
 def signature_rows(book, sheet, row, context, last_col):
@@ -419,6 +420,7 @@ def report_sheet(book, context):
     vehicle, report = context["vehicle"], dict(context["report"], _monthly=monthly)
     money, price, liters, km = "#,##0.00", "#,##0.000", "#,##0.00", "#,##0"
     sheet_title(book, sheet, 0, ("Mesačný" if monthly else "Ročný") + " výkaz spotreby PHM motorového vozidla", 8)
+    sheet.merge_range(1, 0, 1, 8, COMPANY, book.fmt(border=0, align="center", font_color="#4A5560"))
     sheet.set_row(2, 20)
     sheet.merge_range(2, 0, 2, 1, "MESIAC:" if monthly else "ROK:", book.label())
     sheet.merge_range(2, 2, 2, 3, period_name(context), book.value(bold=True, align="center", font_size=11))
@@ -549,7 +551,8 @@ def list_header(book, sheet, title, context, columns):
     last = len(columns) - 1
     sheet.set_row(0, 26)
     sheet.merge_range(0, 0, 0, last, title, book.fmt(bold=True, font_size=12, align="center", border=2))
-    sheet.merge_range(1, 0, 1, last, f"EČV {context['vehicle'].registration} · {context['vehicle'].name} · {period_name(context)}",
+    brand(sheet, 0)
+    sheet.merge_range(1, 0, 1, last, f"{COMPANY} · EČV {context['vehicle'].registration} · {context['vehicle'].name} · {period_name(context)}",
                       book.fmt(border=0, align="center", font_color="#4A5560"))
     for col, (label, width) in enumerate(columns):
         sheet.set_column(col, col, width)
@@ -559,34 +562,63 @@ def list_header(book, sheet, title, context, columns):
 
 
 def trips_sheet(book, context):
+    """Trips with the refuels between them (red); consumption is litres of the closing refuel per km since the previous one."""
     sheet = book.book.add_worksheet("Jazdy")
     columns = [("P.č.", 5), ("Dátum", 11), ("Cieľ", 22), ("Odkiaľ", 16), ("Typ", 10), ("Tach. od", 10), ("Tach. do", 10),
-               ("Km", 7), ("Spotreba (l)", 10), ("Účel", 18), ("Pôvod záznamu", 16)]
+               ("Km", 7), ("l/100 km", 9), ("Spotreba (l)", 10), ("Účel", 18), ("Pôvod záznamu", 16)]
     list_header(book, sheet, "Kniha jázd", context, columns)
-    row, estimated = 3, False
-    for index, trip in enumerate(context["trips"], 1):
-        estimated |= bool(trip.get("estimated"))
-        values = [f"{index}.", None, trip.get("destination") or "", trip.get("origin") or "",
-                  "mesto" if trip.get("category") == "mesto" else "mimo mesta"]
+    red = {"font_color": "#C0262D", "bg_color": "#FCE8E8"}
+    row, index, estimated = 3, 0, False
+    for entry in context["rows"]:
+        per100 = entry.get("per100")
+        write_day(book, sheet, row, 1, entry["day"], **(red if entry["type"] == "fuel" else {}))
+        if entry["type"] == "fuel":
+            text = f"Tankovanie {number(entry['purchased'])} l · {number(entry['gross'])} €"
+            for col in range(len(columns)):
+                if col == 1:
+                    continue
+                if col == 6 and entry.get("odo") is not None:
+                    sheet.write_number(row, col, float(entry["odo"]), book.value("#,##0", bold=True, **red))
+                elif col == 8 and per100 is not None:
+                    sheet.write_number(row, col, float(per100), book.value("#,##0.0", bold=True, **red))
+                else:
+                    value = {2: text, 3: entry.get("station") or "", 11: entry.get("source") or ""}.get(col, "")
+                    sheet.write_string(row, col, value, book.label(bold=True, **red))
+            row += 1
+            continue
+        index += 1
+        estimated |= bool(entry.get("estimated"))
+        values = [f"{index}.", None, entry.get("destination") or "", entry.get("origin") or "",
+                  "mesto" if entry.get("category") == "mesto" else "mimo mesta"]
         for col, value in enumerate(values):
             if value is not None:
                 sheet.write_string(row, col, value, book.label(align="center" if col == 0 else "left"))
-        write_day(book, sheet, row, 1, trip["day"])
-        for col, key, number_format in ((5, "start_odo", "#,##0"), (6, "end_odo", "#,##0"), (7, "distance", "#,##0"), (8, "consumed", "#,##0.00")):
-            sheet.write_number(row, col, float(dec(trip[key])), book.value(number_format))
-        sheet.write_string(row, 9, trip.get("purpose") or "", book.label())
-        sheet.write_string(row, 10, (trip.get("source") or "") + (" *" if trip.get("estimated") else ""), book.label())
+        for col, key in ((5, "start_odo"), (6, "end_odo"), (7, "distance")):
+            sheet.write_number(row, col, float(dec(entry[key])), book.value("#,##0"))
+        if per100 is None:
+            sheet.write_blank(row, 8, None, book.value())
+            sheet.write_blank(row, 9, None, book.value())
+        else:
+            guess = {"italic": True, "font_color": "#4A5560"} if entry.get("per100_estimate") else {}
+            sheet.write_number(row, 8, float(per100), book.value("#,##0.0", **guess))
+            sheet.write_number(row, 9, float(dec(per100 * entry["distance"] / 100)), book.value("#,##0.00", **guess))
+        sheet.write_string(row, 10, entry.get("purpose") or "", book.label())
+        sheet.write_string(row, 11, (entry.get("source") or "") + (" *" if entry.get("estimated") else ""), book.label())
         row += 1
     sheet.merge_range(row, 0, row, 6, "SPOLU", book.head(align="left"))
-    if context["trips"]:
+    if context["rows"]:
         sheet.write_formula(row, 7, f"=SUM(H4:H{row})", book.head(align="right", num_format="#,##0"))
-        sheet.write_formula(row, 8, f"=SUM(I4:I{row})", book.head(align="right", num_format="#,##0.00"))
+        sheet.write_formula(row, 9, f"=SUM(J4:J{row})", book.head(align="right", num_format="#,##0.00"))
         sheet.autofilter(2, 0, row - 1, len(columns) - 1)
     else:
         sheet.write_number(row, 7, 0, book.head(align="right"))
-        sheet.write_number(row, 8, 0, book.head(align="right"))
-    sheet.write_blank(row, 9, None, book.head())
-    sheet.write_blank(row, 10, None, book.head())
+        sheet.write_number(row, 9, 0, book.head(align="right"))
+    for col in (8, 10, 11):
+        sheet.write_blank(row, col, None, book.head())
+    row += 1
+    sheet.write_string(row, 0, "Červené riadky sú tankovania. l/100 km = natankované litre / km od predošlého tankovania; "
+                       "sivou kurzívou je predbežný priemer jázd, ktoré ďalšie tankovanie ešte neuzavrelo.",
+                       book.fmt(border=0, font_size=8, font_color="#4A5560"))
     if estimated:
         row += 1
         sheet.write_string(row, 0, ESTIMATE, book.fmt(border=0, font_size=8, font_color="#4A5560"))
@@ -630,7 +662,7 @@ def xlsx(context, kind="report"):
     book = Book(buffer)
     if kind == "report":
         report_sheet(book, context)
-    if kind in ("report", "trips"):
+    if kind == "trips":
         trips_sheet(book, context)
     if kind in ("report", "fuel"):
         fuel_sheet(book, context)

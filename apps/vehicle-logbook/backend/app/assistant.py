@@ -1103,13 +1103,47 @@ def tank_balance(db, vehicle, session, state):
                                     "Skontrolujte litre na bločku alebo doplňte jazdy pred týmto tankovaním.")
             if measured is not None:
                 level = D(measured)  # measured tank level after refuel, as in the ledger
-        rows[row_id] = dict(before=rounded(before, "0.1"), after=rounded(level, "0.1"))
+        rows[row_id] = dict(before=rounded(before, "0.1"), after=rounded(level, "0.1"),
+                            used=rounded(use, "0.1") if use is not None else None)
         days[key[0]] = rounded(level, "0.1")
+    per_refuel(events, rows, kept, state, km_since_refuel(db, vehicle, session.month))
     if planned and level < -tolerance:
         warnings.append(fuel_shortage_text(vehicle, state, kept, opening, purchased, consumed, level))
     return dict(opening=rounded(opening, "0.1"), purchased=rounded(purchased, "0.1"), consumed=rounded(consumed, "0.1"),
                 closing=rounded(level, "0.1"), capacity=rounded(vehicle.capacity, "0.1"), planned=planned,
                 rows=rows, days=days, warnings=warnings, violations=violations)
+
+
+def km_since_refuel(db, vehicle, month):
+    """Kilometre z knihy jázd od posledného tankovania pred mesiacom po jeho začiatok (patria do prvého okna)."""
+    last = db.scalar(select(Fuel.day).where(Fuel.vehicle_id == vehicle.id, Fuel.day < month).order_by(Fuel.day.desc()).limit(1))
+    if last is None:
+        return None   # bez skoršieho tankovania sa prvé okno nedá uzavrieť
+    return db.scalar(select(func.coalesce(func.sum(Trip.end_odo - Trip.start_odo), 0))
+                     .where(Trip.vehicle_id == vehicle.id, Trip.day > last, Trip.day < month))
+
+
+def per_refuel(events, rows, kept, state, km_before):
+    """Priemerná spotreba v l/100 km medzi tankovaniami (ako stĺpec sadzby v pôvodnom Exceli): litre natankované
+    pri tankovaní / kilometre od predošlého tankovania. Pri každej jazde okna je ten istý priemer; jazdy po poslednom
+    tankovaní mesiaca priemer nemajú (okno ešte nie je uzavreté)."""
+    distance = {f"kniha-j{t.id}": t.end_odo - t.start_odo for t in kept}
+    distance.update({t["id"]: t.get("distance") or 0 for t in state["trips"]})
+    window, carried = [], km_before
+    for _key, row_id, use, refuel, _measured in sorted(events, key=lambda event: event[0]):
+        if use is not None:
+            window.append(row_id)
+            continue
+        if carried is None:   # prvé tankovanie bez známeho predošlého: priemer by bol nepresný
+            km_total, average = sum(distance.get(i, 0) for i in window), None
+        else:
+            km_total = carried + sum(distance.get(i, 0) for i in window)
+            average = rounded(D(refuel) * 100 / km_total, "0.1") if km_total else None
+        carried = 0
+        rows[row_id].update(km=km_total, per100=average)
+        for trip_id in window:
+            rows[trip_id].update(per100=average, window=row_id)
+        window = []
 
 
 def fuel_shortage_text(vehicle, state, kept, opening, purchased, consumed, level):

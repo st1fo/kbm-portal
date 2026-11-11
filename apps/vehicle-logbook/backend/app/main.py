@@ -329,18 +329,20 @@ def close(identifier: int,month: date,db=Db,user=Admin):
 
 @app.post("/api/vehicles/{identifier}/reopen")
 def reopen(identifier: int,month: date,db=Db,user=Admin):
+    """Reopens the month and every later closed one (closings are cumulative), including a lock imported from Excel."""
     vehicle = vehicle_for(db,user,identifier,True)
     month = month_of(month)
-    latest = db.scalar(select(func.max(Closing.month)).where(Closing.vehicle_id == identifier))
-    if latest and month == latest:
-        db.delete(db.get(Closing,(identifier,month)))
-    elif not latest and vehicle.imported_lock and month_of(vehicle.imported_lock) == month:
-        vehicle.imported_lock = None
-    else:
-        fail("Najprv otvorte najnovšiu uzávierku.",409)
-    audit(db,user,"Obdobie otvorené",identifier,month=month)
+    later = list(db.scalars(select(Closing).where(Closing.vehicle_id == identifier,Closing.month >= month)))
+    locked = bool(vehicle.imported_lock and vehicle.imported_lock >= month)
+    if not later and not locked:
+        fail("Mesiac nie je uzavretý.",409)
+    for closing in later:
+        db.delete(closing)
+    if locked:
+        vehicle.imported_lock = month - timedelta(days=1) if month > month_of(vehicle.start_date) else None
+    audit(db,user,"Obdobie otvorené",identifier,month=month,reopened=[c.month.isoformat() for c in later])
     db.commit()
-    return {"ok":True}
+    return {"ok":True,"reopened":len(later) or 1}
 
 def annual(reports):
     first,last = reports[0],reports[-1]
@@ -356,7 +358,7 @@ def annual(reports):
 
 @app.get("/api/vehicles/{identifier}/export")
 def export(identifier: int,year: int=Query(ge=1900,le=9998),month: int | None=Query(None,ge=1,le=12),
-           format: str="xlsx",kind: str="report",signed: str | None=None,db=Db,user=Member):
+           format: str="xlsx",kind: str="report",signed: str | None=None,inline: bool=False,db=Db,user=Member):
     # dátum pri podpise: bez parametra dnešok, prázdny = voľná linka na ručné vypísanie
     if signed is None: signed_day = today()
     elif not signed.strip(): signed_day = None
@@ -368,9 +370,8 @@ def export(identifier: int,year: int=Query(ge=1900,le=9998),month: int | None=Qu
     results = months(db,vehicle,year)
     selected = [results[month-1]] if month else results
     rows = [row for value in selected for row in value["rows"]]
-    trips = [row for row in rows if row["type"] == "trip"]
     purchases = [row for row in rows if row["type"] == "fuel"]
-    context = dict(vehicle=vehicle, year=year, month=month, months=selected, trips=trips, fuels=purchases,
+    context = dict(vehicle=vehicle, year=year, month=month, months=selected, rows=rows, fuels=purchases,
                    report=selected[0] if month else annual(selected), author=getattr(user, "display_name", user.username),
                    day=signed_day, place=distances.HOME)
     period = f"{year}-{month:02}" if month else str(year)
@@ -383,7 +384,9 @@ def export(identifier: int,year: int=Query(ge=1900,le=9998),month: int | None=Qu
     kind_name = {"report": "vykaz", "trips": "jazdy", "fuel": "tankovanie"}[kind]
     plate = "".join(char for char in vehicle.registration if char.isascii() and (char.isalnum() or char in "-_"))
     filename = f"{kind_name}-{plate or 'vozidlo'}-{period}.{format}"
-    return Response(data,media_type=mime,headers={"Content-Disposition":f'attachment; filename="{filename}"'})
+    # inline = náhľad PDF priamo v stránke, inak stiahnutie
+    disposition = "inline" if inline and format == "pdf" else "attachment"
+    return Response(data,media_type=mime,headers={"Content-Disposition":f'{disposition}; filename="{filename}"'})
 
 @app.get("/api/users")
 def users(db=Db,user=Admin):

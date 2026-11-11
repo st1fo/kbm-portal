@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import datetime, time
 from decimal import Decimal
 from hashlib import sha256
 from io import BytesIO
@@ -16,6 +16,13 @@ def day(value):
 
 def dec(value):
     return Decimal(str(value)).quantize(Decimal("0.0000000001")).normalize()
+
+def number(value):
+    """Číslo bunky; Excel občas uloží sumu ako dátum (65,55 € → 5. 3. 1900 13:12), vtedy ho vrátime späť."""
+    if isinstance(value, datetime):
+        delta = value - datetime(1899, 12, 30)
+        return round(delta.days + delta.seconds / 86400, 4)
+    return value
 
 def integer(value):
     result = int(value)
@@ -49,6 +56,7 @@ def read(w, digest):
     last_day = config["start_date"]
     for i, r in enumerate(w["cesty"].iter_rows(min_row=2, max_col=32, values_only=True), 2):
         a,b,c,d,e,f,g,h,liters,gross,vat,clock,station,n,rate,p,q,opening,ending,t,u,*flags = r
+        liters, gross = number(liters), number(gross)
         if not any(v is not None and v != "" and v != 0 for v in (g, liters, gross)) and not (
                 isinstance(f, (int, float)) and f != e):
             continue
@@ -56,9 +64,17 @@ def read(w, digest):
             dt = day(a)
             if dt < last_day:
                 raise ValueError("Dátumy nie sú chronologické.")
-            start, end = integer(e), integer(f)
-            if start != previous or end < start or end - start != integer(g):
-                raise ValueError("Tachometer a vzdialenosť nenadväzujú. Riadok vynechaný.")
+            # E je v Exceli vzorec „koniec predošlého riadku“; bez uloženej hodnoty ho dopočítame, F z E + G
+            start = integer(e) if e is not None else previous
+            end = integer(f) if f is not None else start + integer(g)
+            if end < start:
+                raise ValueError("Koncový tachometer je nižší než začiatočný. Riadok vynechaný.")
+            if g is not None and end - start != integer(g):
+                # tachometre majú prednosť pred stĺpcom vzdialenosti (tak sa počíta aj zvyšok zošita)
+                warnings.append(f"cesty, riadok {i}. Vzdialenosť {g} km nesedí s tachometrom, použitých {end - start} km.")
+            if start != previous:
+                # jeden chybný riadok nesmie zahodiť zvyšok zošita: pokračuje sa od tachometra v Exceli
+                warnings.append(f"cesty, riadok {i}. Tachometer nenadväzuje na predošlý riadok ({previous} → {start}).")
         except (ValueError, TypeError, OverflowError) as error:
             warnings.append(f"cesty, riadok {i}. {error}")
             continue
@@ -70,14 +86,20 @@ def read(w, digest):
                     warnings.append(f"cesty, riadok {i}. Vzdialenosť nebola v Exceli ručne fixovaná.")
                 if q in ("#DIV/0!", "#VALUE!", "#REF!") or u in ("#DIV/0!", "#VALUE!", "#REF!"):
                     warnings.append(f"cesty, riadok {i}. Chybná finančná hodnota bude prepočítaná.")
-                if not isinstance(rate,(int,float)) or rate <= 0:
+                if not isinstance(rate,(int,float)) or rate < 0.1:   # aj takmer nulové zvyšky výpočtu (napr. 5e-14)
                     warnings.append(f"cesty, riadok {i}. Neplatná spotreba nahradená normou.")
                     rate = config["city_rate" if d == "mesto" else "outside_rate"]
+                if d not in ("mesto", "mimo mesto"):   # napr. jazda cez víkend bez vyplnenej kategórie
+                    d = "mesto" if end - start <= (config["city_limit"] or 0) else "mimo mesto"
+                    warnings.append(f"cesty, riadok {i}. Chýba kategória, doplnené „{d}“ podľa vzdialenosti.")
+                    if not isinstance(rate,(int,float)) or rate < 0.1:
+                        rate = config["city_rate" if d == "mesto" else "outside_rate"]
                 trip = TripIn(day=dt, start_odo=start, end_odo=end, category=d, destination=str(b or ""),
                     note=str(c or ""), rate=dec(rate)).model_dump()
                 trip.update(legacy_row=i, estimated=estimated)
             except (ValueError, TypeError):
                 warnings.append(f"cesty, riadok {i}. Neplatné údaje jazdy, riadok vynechaný.")
+                previous, last_day = end, dt   # tachometer ide ďalej, aby nenadväzovali všetky nasledujúce riadky
                 continue
         if trip:
             trips.append(trip)
@@ -89,7 +111,7 @@ def read(w, digest):
                     warnings.append(f"cesty, riadok {i}. Stav nádrže po tankovaní chýba alebo je mimo rozsahu.")
                 value = FuelIn(day=dt, odo=end, liters=dec(liters), gross=dec(gross),
                     vat=dec(vat)*100 if vat is not None else (23 if dt.year >= 2025 else 20),
-                    clock=clock, station=str(station or ""), measured=measured)
+                    clock=clock if isinstance(clock, time) else None, station=str(station or ""), measured=measured)
                 record = value.model_dump(exclude={"unit_price","clock"})
                 record.update(legacy_row=i, clock=value.clock.isoformat() if value.clock else "")
                 purchases.append(record)

@@ -231,14 +231,21 @@ class AssistantFlowTests(unittest.TestCase):
                                 params={"year": self.month.year, "month": self.month.month, "format": "xlsx"})
         self.assertTrue(export.content.startswith(b"PK"))
         book = load_workbook(io.BytesIO(export.content))
-        self.assertEqual(book.sheetnames, ["Mesačný výkaz", "Jazdy", "Tankovanie"])
+        self.assertEqual(book.sheetnames, ["Mesačný výkaz", "Tankovanie"])  # zoznam jázd vo výkaze nie je
         report_sheet = book["Mesačný výkaz"]
         cells = {cell.value for row in report_sheet.iter_rows() for cell in row if cell.value is not None}
         self.assertTrue({"Vypracoval:", "Podpis:", "Maroš Sokolák", "V Žiline dňa:", "Prehľad tankovania"} <= cells)
         self.assertEqual(report_sheet.page_setup.orientation, "portrait")
-        trips_sheet = book["Jazdy"]
+        export = self.admin.get(f"/api/vehicles/{self.vehicle}/export",
+                                params={"year": self.month.year, "month": self.month.month, "format": "xlsx", "kind": "trips"})
+        trips_sheet = load_workbook(io.BytesIO(export.content))["Jazdy"]
         self.assertEqual(trips_sheet["C3"].value, "Cieľ")
-        self.assertTrue(all("odhad" in (trips_sheet.cell(row, 11).value or "").lower() for row in range(4, 9)))
+        listed = [str(trips_sheet.cell(row, 3).value or "") for row in range(4, trips_sheet.max_row + 1)]
+        refuels = [row for row, text in enumerate(listed, 4) if text.startswith("Tankovanie")]
+        self.assertTrue(refuels)  # tankovania sú medzi jazdami, červeným
+        self.assertEqual(trips_sheet.cell(refuels[0], 3).font.color.rgb, "FFC0262D")
+        trip_rows = [row for row in range(4, trips_sheet.max_row + 1) if str(trips_sheet.cell(row, 1).value or "").endswith(".")]
+        self.assertEqual(sum("odhad" in str(trips_sheet.cell(row, 12).value or "").lower() for row in trip_rows), 5)
         if Path(os.getenv("PDF_FONT", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")).exists():
             export = self.admin.get(f"/api/vehicles/{self.vehicle}/export",
                                     params={"year": self.month.year, "month": self.month.month, "format": "pdf"})

@@ -80,7 +80,9 @@ Logbook domain logic sits in `apps/vehicle-logbook/backend/app/`:
 - `ledger.py` handles fuel and consumption balances and reports.
 - `planner.py` is the deterministic monthly-trip wizard.
 - `importer.py` imports the legacy `vzor_cesr.xlsm` workbook.
-- `exports.py` produces PDF and XLSX output.
+- `exports.py` produces PDF and XLSX output; the header carries the KBM logo (`app/assets/kbm-logo.png`) and `COMPANY` (env `REPORT_COMPANY`). `?inline=1` serves the PDF for the in-page preview (Výkazy → Náhľad).
+- Consumption is shown in l/100 km (what the users think in), from refuel to refuel: `ledger.per_refuel` sets `per100` (refuel litres × 100 / km since the previous refuel, across months; `window_km` on the refuel) on the refuel and every trip of that window; trips not closed by a refuel yet borrow the nearest known average with `per100_estimate` (shown as „≈“). Closed months keep their snapshot, but `months()` overlays the live `per100`. An admin can reopen any closed month (`/reopen`); later closings and an imported lock from that month on are removed too. The Jazdy page lists the refuels between the trips in red (`.refuel-row`) and shows the tank after each row (`end_liters`); the Jazdy Excel export (`kind=trips`) does the same. The výkaz (PDF/XLSX `kind=report`) no longer lists trips. In the wizard `per_refuel` (in `tank_balance`) sets `rows[id].per100` = refuel litres / km since the previous refuel (the first window includes logbook km since the last refuel before the month, `km_since_refuel`); trips after the month's last refuel have none. The wizard trip dialog recomputes that average, the norm consumption and the tank live while km are typed; the logbook trip dialog shows consumption and tank after the trip.
+- `importer.py` keeps the odometer chain going past a bad row (missing cached E/F, empty category, near-zero rate, amounts stored as dates) and warns instead of dropping the rest of the workbook.
 
 `EXCEL_ANALYSIS.md` documents how the original Excel formulas and VBA map onto the app.
 

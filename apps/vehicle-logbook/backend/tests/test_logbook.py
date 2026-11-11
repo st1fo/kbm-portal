@@ -109,10 +109,16 @@ class LogbookTests(unittest.TestCase):
             self.assertTrue(self.period(path)["closed"])
             self.assertTrue(self.period(path,2)["closed"])
             self.assertEqual(regular.post(path+"/trips",json={"day":"2024-01-20","end_odo":130,"category":"mesto"}).status_code,409)
-            self.assert_status(self.client.post(path+"/reopen",params={"month":"2024-01-01"}),409)
+            self.assertEqual(regular.post(path+"/reopen",params={"month":"2024-01-01"}).status_code,403)
             self.assert_status(self.client.post(path+"/reopen",params={"month":"2024-02-01"}))
             self.assertTrue(self.period(path)["closed"])
             self.assertFalse(self.period(path,2)["closed"])
+            self.assert_status(self.client.post(path+"/close",params={"month":"2024-02-01"}))
+            self.assert_status(self.client.post(path+"/reopen",params={"month":"2024-01-01"}))  # otvorí aj február
+            self.assertFalse(self.period(path)["closed"])
+            self.assertFalse(self.period(path,2)["closed"])
+            self.assert_status(self.client.post(path+"/reopen",params={"month":"2024-01-01"}),409)
+            self.assert_status(self.client.post(path+"/close",params={"month":"2024-01-01"}))
 
     def test_export_and_formula_injection(self):
         path = self.add_vehicle("EXPORT")
@@ -128,7 +134,7 @@ class LogbookTests(unittest.TestCase):
                 if extension == "pdf":
                     self.assertTrue(response.content.startswith(b"%PDF"))
                 else:
-                    workbook = load_workbook(io.BytesIO(response.content),read_only=True)
+                    workbook = load_workbook(io.BytesIO(self.client.get(path+"/export",params={**query,"kind":"trips"}).content),read_only=True)
                     self.assertEqual(workbook["Jazdy"]["C4"].value,"=1+1")
                     self.assertEqual(workbook["Jazdy"]["C4"].data_type,"s")
                     workbook.close()
@@ -202,7 +208,7 @@ class LogbookTests(unittest.TestCase):
         self.assertEqual(report['distance'],200)
         self.assertTrue(all(row['source']=='Mesačný odhad' for row in report['rows'] if row['type']=='trip'))
         self.assert_status(self.client.post(path+"/monthly-drafts",json=body),409)
-        export = self.client.get(path+'/export',params={'year':2024,'month':1,'format':'xlsx'})
+        export = self.client.get(path+'/export',params={'year':2024,'month':1,'format':'xlsx','kind':'trips'})
         workbook = load_workbook(io.BytesIO(export.content),read_only=True)
         sheet=workbook['Jazdy']
         headers=[cell.value for cell in sheet[3]]
@@ -307,6 +313,21 @@ Stav km Dátum Čas Číslo Miesto čerpania Mesto Sieť Produkt Množstvo Zľav
 0 19.01.2024 11:56 988759 8269 Zilina Vys Žilina Shell Sk Nafta 30,00 -0,02 1,495 39,03 23,00 8,97 48,00
 Karta celkom 39,03 8,97 48,00
 Celkom za všetky karty 107,33 24,67 132,00""".splitlines()
+
+
+class PerRefuelTests(unittest.TestCase):
+    def test_average_from_refuel_to_refuel(self):
+        from app.ledger import per_refuel
+        trip = lambda km: {"type": "trip", "distance": km}
+        fuel = lambda liters: {"type": "fuel", "purchased": Decimal(liters)}
+        rows = [trip(50), fuel(40), trip(100), trip(300), fuel(32), trip(80)]
+        per_refuel(rows)
+        self.assertEqual([r["per100"] for r in rows], [Decimal("8.00"), None, Decimal("8.00"), Decimal("8.00"), Decimal("8.00"), Decimal("8.00")])
+        self.assertEqual([r["per100_estimate"] for r in rows], [True, False, False, False, False, True])
+        self.assertEqual(rows[4]["window_km"], 400)
+        rows = [trip(50), fuel(40), trip(100), fuel(10), trip(20)]
+        per_refuel(rows)
+        self.assertEqual((rows[0]["per100"], rows[4]["per100"]), (Decimal("10.00"), Decimal("10.00")))
 
 
 class FuelInvoiceTests(unittest.TestCase):

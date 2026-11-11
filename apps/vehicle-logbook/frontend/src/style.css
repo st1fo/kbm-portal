@@ -312,7 +312,23 @@ details > summary { cursor: pointer; }
 .md-date b { display: inline-block; width: 22px; }
 .md-items { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .md-none { font-size: .85rem; opacity: .6; }
-.md-tank { font-size: .8rem; text-align: right; opacity: .75; white-space: nowrap; }
+.md-tank { font-size: .8rem; text-align: right; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.md-head { display: grid; grid-template-columns: 74px minmax(0,1fr) 52px 34px; gap: 8px; padding: 6px 4px 4px; margin-top: 10px;
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 650; }
+.md-head span:nth-child(3) { text-align: right; white-space: nowrap; }
+.md-head + .month-days { margin-top: 0; }
+.md-fuel { color: var(--muted); font-weight: 400; }
+.md-per100 { color: var(--muted); }
+.md-per100 b { color: var(--ink); font-weight: 650; }
+.trip-fuel { display: grid; gap: 4px; padding: 10px 12px; border-radius: 10px; background: var(--tank-bg); }
+.trip-fuel > div { display: flex; align-items: baseline; gap: 8px; }
+.trip-fuel > div span { color: var(--muted); flex: 1; }
+.trip-fuel > div small { color: var(--muted); }
+.trip-fuel b { font-variant-numeric: tabular-nums; }
+.trip-fuel.typed b { color: var(--warn); }
+.pdf-preview { height: calc(100dvh - 64px); }
+.pdf-preview .MuiDialogContent-root { padding: 0 !important; display: flex; }
+.pdf-preview iframe { flex: 1; width: 100%; border: 0; min-height: 60vh; }
 .md-add { display: flex; justify-content: center; align-items: center; }
 .md-add .MuiIconButton-root { width: 30px; height: 30px; flex: none; }
 .md-item { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; width: 100%; text-align: left; font: inherit; color: inherit;
@@ -335,8 +351,10 @@ button.md-item:hover:not(:disabled) { border-color: var(--bar); background: var(
 .md-tag.bad { border-color: var(--err-line); color: var(--err-ink); background: var(--err-bg); }
 .edit-dialog { display: flex; flex-direction: column; gap: 14px; padding-top: 8px !important; }
 @media (max-width: 600px) {
-  .md-day { grid-template-columns: 62px minmax(0,1fr) 30px; gap: 6px; padding: 4px 2px; min-height: 34px; }
-  .md-tank { display: none; }
+  .md-day { grid-template-columns: 62px minmax(0,1fr) 44px 30px; gap: 6px; padding: 4px 2px; min-height: 34px; }
+  .md-tank { font-size: .74rem; }
+  .md-head { grid-template-columns: 62px minmax(0,1fr) 44px 30px; gap: 6px; padding: 4px 2px; font-size: .66rem; }
+  .md-head span:nth-child(3) { white-space: normal; line-height: 1.1; }
   .md-date { font-size: .82rem; }
   .md-date b { width: auto; margin-right: 3px; }
   .md-none { font-size: .78rem; }
@@ -414,3 +432,11 @@ button.md-item:hover:not(:disabled) { border-color: var(--bar); background: var(
   .panel .records td b { overflow-wrap: anywhere; }
   .app.phone .MuiSnackbar-root { bottom: calc(80px + env(safe-area-inset-bottom)); }
 }
+.text-warn { color: var(--warn); }
+
+/* Tankovania v zozname jázd: zvýraznené červeným */
+.records tr.refuel-row td { background: var(--err-bg); color: var(--err-ink); border-color: var(--err-line); }
+.records tr.refuel-row td:first-child { box-shadow: inset 3px 0 0 var(--err-ink); }
+.records tr.refuel-row .route, .card-row.refuel-row .card-main { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; color: var(--err-ink); }
+.card-row.refuel-row { background: var(--err-bg); border-color: var(--err-line); border-left: 3px solid var(--err-ink); color: var(--err-ink); }
+.card-row.refuel-row .card-sub { color: var(--err-ink); }

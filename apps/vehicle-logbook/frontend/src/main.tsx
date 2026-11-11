@@ -184,8 +184,9 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
   const [confirm,setConfirm]=useState<Confirm>();
   const [committing,setCommitting]=useState(false);
   const [search,setSearch]=useState('');
-  const [descending,setDescending]=useState(true);
+  const [descending,setDescending]=useState(false);
   const [annual,setAnnual]=useState(false);
+  const [preview,setPreview]=useState(false);   // náhľad PDF výkazu v okne
   const [invoice,setInvoice]=useState(false);   // dialóg faktúry z tankovacích kariet (správca)
   const [signed,setSigned]=useState(()=>localDay());   // dátum pri podpise vo výkaze; prázdny = ručne
   const [demoBusy,setDemoBusy]=useState(false);
@@ -247,7 +248,9 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
       onDelete:row?()=>askDelete(kind,row):undefined};
     if (row) {
       const { warnings: _warnings, ...values } = row;
-      setEdit({...settings,initial:{...values,liters:row.purchased,unit_price:'',clock:String(row.clock??'').slice(0,5)}});
+      // pri jazde: stav nádrže pred ňou a normy vozidla, aby okno ukázalo spotrebu a nádrž po zmene km
+      const fuel=kind==='trips'&&vehicle?{before:Number(row.end_liters)+Number(row.consumed),city:Number(vehicle.city_rate),outside:Number(vehicle.outside_rate)}:undefined;
+      setEdit({...settings,fuel,initial:{...values,liters:row.purchased,unit_price:'',clock:String(row.clock??'').slice(0,5)}});
       return;
     }
     const today=localDay();
@@ -284,7 +287,7 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
   }
   function monthAction(reopening:boolean) {
     setConfirm(reopening
-      ? {title:'Otvoriť uzávierku?',text:<>{monthName(month)} {year} sa znova otvorí na úpravy.</>,label:'Otvoriť',
+      ? {title:'Otvoriť mesiac?',text:<>{monthName(month)} {year} sa znova otvorí na úpravy. Ak sú uzavreté aj neskoršie mesiace, otvoria sa tiež.</>,label:'Otvoriť',
          message:'Mesiac je otvorený.',run:()=>api.post(path+'/reopen',null,{params:{month:report?.month+'-01'}})}
       : {title:'Uzavrieť mesiac?',text:<>Uzavrú sa všetky mesiace do konca obdobia {monthName(month)} {year}. Záznamy v nich už nepôjde meniť, kým správca uzávierku neotvorí.</>,
          label:'Uzavrieť',message:'Mesiac je uzavretý.',run:()=>api.post(path+'/close',null,{params:{month:report?.month+'-01'}})});
@@ -304,24 +307,35 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
     <summary>{issues.length} {plural(issues.length,'vec','veci','vecí')} na kontrolu v tomto mesiaci</summary>
     <ul>{issues.map((issue,index)=><li key={index}>{issue}</li>)}</ul>
   </details></Alert>;
-  const lockedChip=closed&&<Chip size="small" icon={<Icon name="lock" size={14}/>} label="Uzavretý mesiac" className="lock-chip" />;
+  const lockChip=closed&&<Chip size="small" icon={<Icon name="lock" size={14}/>} label="Uzavretý mesiac" className="lock-chip" />;
+  const lockedChip=closed&&<>{lockChip}
+    {account.admin&&<Button size="small" variant="outlined" startIcon={<Icon name="lock" size={16}/>} onClick={()=>monthAction(true)}>Otvoriť mesiac</Button>}</>;
 
   function renderRecords(kind:'trips'|'fuel') {
     const isTrip=kind==='trips';
+    // Jazdy ukazujú aj tankovania (červeným); l/100 km = litre tankovania / km od predošlého (per100 z backendu)
     const all=(report?.rows??[]).filter(row=>row.type===(isTrip?'trip':'fuel'));
+    const listed=isTrip?(report?.rows??[]):all;
+    const per100=(row:Entry)=>row.per100==null?null:Number(row.per100);
+    const used=(row:Entry)=>per100(row)==null?null:per100(row)!*Number(row.distance)/100;
     const needle=search.trim().toLocaleLowerCase('sk');
-    const rows=all.filter(row=>!needle||[row.destination,row.origin,row.station,row.note,row.purpose]
+    const rows=listed.filter(row=>!needle||[row.destination,row.origin,row.station,row.note,row.purpose]
       .some(value=>String(value??'').toLocaleLowerCase('sk').includes(needle)));
     if(descending) rows.reverse();
     const totalKm=all.reduce((s,r)=>s+Number(r.distance??0),0);
     const totalL=all.reduce((s,r)=>s+Number(r.purchased??0),0), totalE=all.reduce((s,r)=>s+Number(r.gross??0),0);
     const warn=(row:Entry)=>row.warnings.length>0&&<Tooltip title={row.warnings.join(' ')}><span className="row-warn"><Icon name="alert" size={16}/></span></Tooltip>;
     const actions=(row:Entry)=>!closed&&<span className="row-actions" onClick={e=>e.stopPropagation()}>
-      <Tooltip title="Upraviť"><IconButton size="small" onClick={()=>rowEdit(kind,row)} aria-label="Upraviť"><Icon name="edit" size={17}/></IconButton></Tooltip>
-      <Tooltip title="Odstrániť"><IconButton size="small" onClick={()=>askDelete(kind,row)} aria-label="Odstrániť"><Icon name="trash" size={17}/></IconButton></Tooltip></span>;
+      <Tooltip title="Upraviť"><IconButton size="small" onClick={()=>rowEdit(kindOf(row),row)} aria-label="Upraviť"><Icon name="edit" size={17}/></IconButton></Tooltip>
+      <Tooltip title="Odstrániť"><IconButton size="small" onClick={()=>askDelete(kindOf(row),row)} aria-label="Odstrániť"><Icon name="trash" size={17}/></IconButton></Tooltip></span>;
     const route=(row:Entry)=>[row.origin,row.destination].filter(Boolean).join(' → ')||'Bez cieľa';
-    const open=(row:Entry)=>({onClick:()=>openRow(kind,row),tabIndex:0,role:'button',
-      onKeyDown:(e:KeyboardEvent)=>{if(e.key==='Enter')openRow(kind,row);}});
+    const kindOf=(row:Entry)=>row.type==='fuel'?'fuel' as const:'trips' as const;
+    const open=(row:Entry)=>({onClick:()=>openRow(kindOf(row),row),tabIndex:0,role:'button',
+      onKeyDown:(e:KeyboardEvent)=>{if(e.key==='Enter')openRow(kindOf(row),row);}});
+    const estimateNote='Predbežne podľa najbližšieho tankovania, spresní sa po ďalšom tankovaní';
+    const approx=(row:Entry)=>row.per100_estimate?'≈ ':'';
+    const tripUse=(row:Entry)=>per100(row)==null?<span className="muted">—</span>
+      :<span title={row.per100_estimate?estimateNote:undefined}>{approx(row)}{fmt(per100(row),1)} l/100 km<small className="muted block">{fmt(used(row))} l</small></span>;
     return <>
       <PageTitle title={isTrip?'Jazdy':'Tankovanie'}>
         {!isTrip&&account.admin&&<Button variant="outlined" startIcon={<Icon name="upload"/>} onClick={()=>setInvoice(true)}>Faktúra z kariet</Button>}
@@ -344,24 +358,43 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
               {isTrip&&monthKey(year,month)<=lastFinished&&<Button variant="outlined" startIcon={<Icon name="wand"/>} onClick={()=>navigate('/mesacny-navrh')}>Vyplniť mesiac sprievodcom</Button>}</div></>}
           </Empty>
         : !rows.length ? <Empty icon="search" title="Nič sa nenašlo"><p>Skúste iné slovo.</p></Empty>
-        : phone ? <div className="cards">{rows.map(row=><Paper variant="outlined" key={String(row.id)} className="card-row" {...open(row)}>
+        : phone ? <div className="cards">{rows.map(row=>isTrip&&row.type==='fuel'
+          ? <Paper variant="outlined" key={'f'+String(row.id)} className="card-row refuel-row" {...open(row)}>
+            <div className="card-top"><span className="card-day">{dayLabel(row.day)}</span>{warn(row)}
+              <b className="card-big">{fmt(row.purchased)} l</b></div>
+            <div className="card-main"><Icon name="fuel" size={15}/> Tankovanie{row.station?' · '+String(row.station):''}</div>
+            <div className="card-sub">{fmt(row.gross)} €{per100(row)!=null?<> · <b>{fmt(per100(row),1)} l/100 km</b> za {fmt(row.window_km)} km</>:''} · v nádrži {fmt(row.end_liters,1)} l</div>
+          </Paper>
+          : <Paper variant="outlined" key={String(row.id)} className="card-row" {...open(row)}>
             <div className="card-top"><span className="card-day">{dayLabel(row.day)}</span>{warn(row)}
               <b className="card-big">{isTrip?fmt(row.distance)+' km':fmt(row.purchased)+' l'}</b></div>
             <div className="card-main">{isTrip?route(row):(row.station||'Tankovanie')}</div>
             <div className="card-sub">{isTrip?<>{fmt(row.start_odo)} → {fmt(row.end_odo)} km · {row.category==='mesto'?'v meste':'mimo mesta'}{row.estimated?' · odhad':''}</>
               :<>{fmt(row.gross)} € · {fmt(row.unit_price,3)} €/l{row.odo!=null?' · '+fmt(row.odo)+' km':''}</>}</div>
+            <div className="card-sub">{isTrip?<>{per100(row)!=null?<>{approx(row)}{fmt(per100(row),1)} l/100 km · spotreba {fmt(used(row))} l · </>:''}v nádrži {fmt(row.end_liters,1)} l</>
+              :<>{per100(row)!=null?<>{fmt(per100(row),1)} l/100 km za {fmt(row.window_km)} km · </>:''}v nádrži po natankovaní {fmt(row.end_liters,1)} l</>}</div>
           </Paper>)}</div>
         : <Paper variant="outlined" className="table-wrap"><table className="records">
-            <thead><tr><th>Dátum</th>{isTrip?<><th>Trasa</th><th>Tachometer</th><th className="num">Km</th><th className="num">Spotreba</th></>
-              :<><th>Stanica</th><th className="num">Litre</th><th className="num">Suma s DPH</th><th className="num">Cena/l</th><th className="num">Tachometer</th></>}<th/></tr></thead>
-            <tbody>{rows.map(row=><tr key={String(row.id)} {...open(row)} className={row.nonworking?'weekend':undefined}>
+            <thead><tr><th>Dátum</th>{isTrip?<><th>Trasa</th><th>Tachometer</th><th className="num">Km</th><th className="num" title="Litre tankovania / km od predošlého tankovania">Spotreba</th><th className="num" title="Stav nádrže po jazde">V nádrži</th></>
+              :<><th>Stanica</th><th className="num">Litre</th><th className="num">Suma s DPH</th><th className="num">Cena/l</th><th className="num">Tachometer</th><th className="num" title="Natankované litre / km od predošlého tankovania">Priemer</th><th className="num" title="Stav nádrže po natankovaní">V nádrži</th></>}<th/></tr></thead>
+            <tbody>{rows.map(row=>isTrip&&row.type==='fuel'
+              ? <tr key={'f'+String(row.id)} {...open(row)} className="refuel-row">
+                <td className="nowrap">{dayLabel(row.day)} {warn(row)}</td>
+                <td><span className="route"><Icon name="fuel" size={15}/> Tankovanie {fmt(row.purchased)} l</span>
+                  <small className="block">{[row.station,fmt(row.gross)+' €'].filter(Boolean).join(' · ')}</small></td>
+                <td className="nowrap">{row.odo!=null?fmt(row.odo):''}</td>
+                <td className="num">{per100(row)!=null?<small>{fmt(row.window_km)} km</small>:''}</td>
+                <td className="num nowrap">{per100(row)!=null?<b>{fmt(per100(row),1)} l/100 km</b>:'—'}</td>
+                <td className="num">{fmt(row.end_liters,1)} l</td>
+                <td className="actions-cell">{actions(row)}</td></tr>
+              : <tr key={String(row.id)} {...open(row)} className={row.nonworking?'weekend':undefined}>
               <td className="nowrap">{dayLabel(row.day)} {warn(row)}</td>
               {isTrip?<><td><span className="route">{route(row)}</span>
                   <small className="muted block">{[row.category==='mesto'?'v meste':'mimo mesta',row.purpose,row.estimated&&String(row.source||'odhad')].filter(Boolean).join(' · ')}</small></td>
                 <td className="nowrap muted">{fmt(row.start_odo)} → {fmt(row.end_odo)}</td>
-                <td className="num"><b>{fmt(row.distance)}</b></td><td className="num">{fmt(row.consumed)} l</td></>
+                <td className="num"><b>{fmt(row.distance)}</b></td><td className="num nowrap">{tripUse(row)}</td><td className="num muted">{fmt(row.end_liters,1)} l</td></>
               :<><td>{row.station||'—'}{row.note&&<small className="muted block">{String(row.note)}</small>}</td><td className="num"><b>{fmt(row.purchased)}</b></td>
-                <td className="num">{fmt(row.gross)} €</td><td className="num">{fmt(row.unit_price,3)} €</td><td className="num muted">{fmt(row.odo)}</td></>}
+                <td className="num">{fmt(row.gross)} €</td><td className="num">{fmt(row.unit_price,3)} €</td><td className="num muted">{fmt(row.odo)}</td><td className="num nowrap">{per100(row)!=null?<>{fmt(per100(row),1)} l/100 km<small className="muted block">{fmt(row.window_km)} km</small></>:'—'}</td><td className="num muted">{fmt(row.end_liters,1)} l</td></>}
               <td className="actions-cell">{actions(row)}</td></tr>)}</tbody>
           </table></Paper>}
       </>}
@@ -421,6 +454,7 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
     <PageTitle title="Výkazy">
       {ready&&<><TextField type="date" size="small" label="Dátum podpisu" value={signed} onChange={event=>setSigned(event.target.value)}
           slotProps={{inputLabel:{shrink:true}}} className="sign-date" sx={{width:{xs:'100%',sm:170}}} title="Dátum pri „V Žiline dňa“. Vymažte ho, ak ho chcete dopísať ručne."/>
+        <Button variant="outlined" startIcon={<Icon name="report"/>} {...(phone?{href:exportLink('pdf','report',annual)+'&inline=1',target:'_blank'}:{onClick:()=>setPreview(true)})}>Náhľad</Button>
         <Button variant="outlined" startIcon={<Icon name="download"/>} href={exportLink('pdf','report',annual)}>PDF</Button>
         <Button variant="contained" startIcon={<Icon name="download"/>} href={exportLink('xlsx','report',annual)}>Excel</Button></>}
     </PageTitle>
@@ -430,9 +464,9 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
           <button type="button" role="tab" aria-selected={!annual} className={!annual?'on':''} onClick={()=>setAnnual(false)}>{monthName(month)}</button>
           <button type="button" role="tab" aria-selected={annual} className={annual?'on':''} onClick={()=>setAnnual(true)}>Celý rok {year}</button>
         </div>
-        {!annual&&lockedChip}
+        {!annual&&lockChip}
         {!annual&&account.admin&&(closed||String(report.month)<thisMonth)&&<Button variant="outlined" size="small" startIcon={<Icon name="lock" size={16}/>}
-          onClick={()=>monthAction(closed)}>{closed?'Otvoriť uzávierku':'Uzavrieť mesiac'}</Button>}
+          onClick={()=>monthAction(closed)}>{closed?'Otvoriť mesiac':'Uzavrieť mesiac'}</Button>}
       </div>
       {(annual?history.some(row=>Number(row.estimated_count)>0):Number(report.estimated_count)>0)&&
         <Alert severity="info">Výkaz obsahuje jazdy odhadnuté z približných podkladov, v exporte sú označené.</Alert>}
@@ -574,6 +608,12 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
     {edit&&<RecordDialog key={edit.path} edit={edit} close={()=>setEdit(undefined)} done={saved=>{
       if(edit.path==='/vehicles'&&saved?.id)setVehicleId(Number(saved.id));
       reload();}} />}
+    {preview&&<Dialog open onClose={()=>setPreview(false)} fullWidth maxWidth="lg" slotProps={{paper:{className:'pdf-preview'}}}>
+      <DialogTitle>Náhľad výkazu · {String(vehicle?.registration??'')} · {annual?year:monthName(month)+' '+year}</DialogTitle>
+      <DialogContent><iframe title="Náhľad výkazu" src={exportLink('pdf','report',annual)+'&inline=1'}/></DialogContent>
+      <DialogActions><Button href={exportLink('pdf','report',annual)} startIcon={<Icon name="download"/>}>Stiahnuť PDF</Button>
+        <Button variant="contained" onClick={()=>setPreview(false)}>Zavrieť</Button></DialogActions>
+    </Dialog>}
     {invoice&&<FuelInvoiceDialog close={()=>setInvoice(false)} done={message=>{setInvoice(false);reload(message);}}/>}
     {userEdit&&<UserDialog account={userEdit} vehicles={vehicles} close={()=>setUserEdit(undefined)} done={()=>reload()}/>}
     {removing&&<DeleteVehicleDialog vehicle={removing} close={()=>setRemoving(undefined)} done={()=>{

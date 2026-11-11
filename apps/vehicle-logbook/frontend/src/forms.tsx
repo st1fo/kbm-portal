@@ -53,6 +53,7 @@ export const destinationFields: Field[] = [
   {key:'note',label:'Poznámka',wide:true},
 ];
 export type Edit = { title:string; path:string; fields:Field[]; initial:Row;
+  fuel?:{ before:number; city:number; outside:number };   // úprava jazdy: nádrž pred jazdou a normy vozidla
   destinations?:Row[]; vehicleId?:number; editing?:boolean; onDelete?:()=>void };
 
 export function RecordDialog({ edit, close, done }: { edit: Edit; close:()=>void; done:(saved?:Row)=>void }) {
@@ -91,6 +92,14 @@ export function RecordDialog({ edit, close, done }: { edit: Edit; close:()=>void
   }
   const km = isTrip && data.end_odo !== '' && data.end_odo != null && data.start_odo !== '' && data.start_odo != null
     ? Number(data.end_odo) - Number(data.start_odo) : null;
+  // spotreba podľa sadzby jazdy (alebo normy kategórie) a nádrž po jazde – mení sa hneď pri písaní kilometrov
+  const fuel = (() => {
+    if (!edit.fuel || km == null || km <= 0) return null;
+    const own = Number(data.rate);
+    const rate = data.rate !== '' && data.rate != null && own > 0 ? own : data.category === 'mesto' ? edit.fuel.city : edit.fuel.outside;
+    const used = km * rate / 100;
+    return { rate, used, after: edit.fuel.before - used };
+  })();
   const unit = isFuel && Number(data.liters) > 0 && Number(data.gross) > 0 ? Number(data.gross) / Number(data.liters) : null;
   function input(field:Field) {
     const common = {label:field.label,required:field.required,helperText:field.help,
@@ -131,7 +140,8 @@ export function RecordDialog({ edit, close, done }: { edit: Edit; close:()=>void
         {problem && <Alert severity="error" sx={{mb:2}}>{problem}</Alert>}
         <div className="form-grid">
           {main.map(field => <FieldBlock key={field.key} field={field}>{input(field)}</FieldBlock>)}
-          {km != null && <p className="wide form-sum">{km > 0 ? <>Vzdialenosť <b>{fmt(km)} km</b></> : 'Koncový stav musí byť vyšší ako začiatočný.'}</p>}
+          {km != null && <p className="wide form-sum">{km > 0 ? <>Vzdialenosť <b>{fmt(km)} km</b>{fuel && <> · spotreba <b>{fmt(fuel.used,1)} l</b>{' '}
+            ({fmt(fuel.rate,1)} l/100 km) · v nádrži po jazde <b className={fuel.after < 0 ? 'text-warn' : undefined}>{fmt(fuel.after,1)} l</b></>}</> : 'Koncový stav musí byť vyšší ako začiatočný.'}</p>}
           {unit != null && <p className="wide form-sum">Cena za liter <b>{fmt(unit,3)} €</b></p>}
           {extra.length > 0 && !more && <Button className="wide more-button" onClick={()=>setMore(true)}>+ Ďalšie údaje</Button>}
           {more && extra.map(field => input(field))}
