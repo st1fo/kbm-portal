@@ -24,13 +24,14 @@ def fingerprint(db, vehicle):
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
 
-def month_context(db, vehicle, month, start_odo, end_odo, today, extra=(), replaceable=False, keep_manual=False):
+def month_context(db, vehicle, month, start_odo, end_odo, today, extra=(), replaceable=False, keep_manual=False, stop=None):
     """Validate the month and return odometer anchors; `extra` holds (day, odo) from unsaved receipts.
     With `replaceable`, trips of this month saved earlier from a monthly draft are ignored (they get replaced).
-    With `keep_manual`, manually entered trips of the month may stay (the caller plans around them)."""
+    With `keep_manual`, manually entered trips of the month may stay (the caller plans around them).
+    `stop` (day after the closing reading) extends the period into the next month."""
     if month >= month_of(today):
         raise PlanError("Mesačný návrh vytvorte po skončení mesiaca.")
-    stop = next_month(month)
+    stop = stop or next_month(month)
     latest = db.scalar(select(Closing.month).where(Closing.vehicle_id == vehicle.id)
                        .order_by(Closing.month.desc()).limit(1))
     if (latest and month <= latest) or (vehicle.imported_lock and stop - timedelta(days=1) <= vehicle.imported_lock):

@@ -77,17 +77,17 @@ class LogbookTests(unittest.TestCase):
         self.assert_status(self.trip(path,150,99),422)
         first = self.assert_status(self.trip(path,150,100))["id"]
         second = self.assert_status(self.trip(path,200,150,"2024-02-01"))["id"]
-        purchase = {"day":"2024-01-15","odo":150,"liters":"10","unit_price":"1.80","vat":"20"}
+        purchase = {"day":"2024-01-15","odo":150,"liters":"44","unit_price":"1.80","vat":"20"}  # 20 l − 4 l + 44 l = plná nádrž
         fuel = self.assert_status(self.client.post(path+"/fuel",json=purchase))["id"]
         self.assert_status(self.client.post(path+"/fuel",json=purchase),409)
         january = self.period(path)
         february = self.period(path,2)
         self.assertEqual(january["distance"],50)
         self.assertEqual(D(january["calculated"]),D("4"))
-        self.assertEqual(D(january["purchase_net"]),D("15"))
-        self.assertEqual(D(january["closing_liters"]),D("26"))
-        self.assertEqual(D(february["opening_liters"]),D("26"))
-        self.assertEqual(D(february["closing_liters"]),D("22"))
+        self.assertEqual(D(january["purchase_net"]),D("66"))
+        self.assertEqual(D(january["closing_liters"]),D("60"))
+        self.assertEqual(D(february["opening_liters"]),D("60"))
+        self.assertEqual(D(february["closing_liters"]),D("56"))
         self.assert_status(self.client.put(path+f"/trips/{first}",json={
             "day":"2024-01-15","start_odo":100,"end_odo":160,"category":"mesto"}))
         self.assertEqual(self.period(path,2)["rows"][0]["start_odo"],160)
@@ -95,6 +95,27 @@ class LogbookTests(unittest.TestCase):
         self.assert_status(self.client.delete(path+f"/fuel/{fuel}"))
         self.assert_status(self.client.delete(path+f"/trips/{second}"))
         self.assertEqual(self.period(path,2)["distance"],0)
+
+    def test_full_tank_rates_between_refuels(self):
+        path = self.add_vehicle("FULL")   # nádrž 60 l, na začiatku 20 l, norma mesto 8 / mimo 6
+        fuel = lambda day, odo, liters: self.assert_status(self.client.post(path+"/fuel",json={
+            "day":day,"odo":odo,"liters":liters,"unit_price":"1.50","vat":"20"}))
+        fuel("2024-01-05",100,"40")
+        self.assert_status(self.trip(path,200,100,"2024-01-10"))
+        self.assert_status(self.client.post(path+"/trips",json={"day":"2024-01-11","end_odo":300,"category":"mimo mesto"}))
+        fuel("2024-01-12",300,"14")
+        self.assert_status(self.client.post(path+"/trips",json={"day":"2024-01-13","end_odo":400,"category":"mimo mesto"}))
+        rows = self.period(path)["rows"]
+        self.assertEqual([D(r["rate"]) for r in rows if r["type"]=="trip"], [D(8),D(6),D(6)])   # 14 l rozdelené ako normy 8 : 6
+        self.assertEqual([round(D(r["end_liters"]),2) for r in rows], [D(60),D(52),D(46),D(60),D(54)])
+        self.assertEqual([r["per100_estimate"] for r in rows if r["type"]=="trip"], [False,False,True])
+        self.assertEqual([D(r["per100"]) for r in rows[1:4]], [D(8),D(6),D(7)])   # jazdy svoju sadzbu, tankovanie priemer úseku
+        self.assertEqual(rows[3]["warnings"], [])
+        fuel("2024-01-20",400,"12")   # 12 l na 100 km pri norme 6 = chýbajú jazdy
+        rows = self.period(path)["rows"]
+        self.assertEqual(D(rows[-1]["per100"]), D(12))
+        self.assertIn("nad normou", rows[-1]["warnings"][0])
+        self.assertEqual(round(D(rows[-1]["end_liters"]),2), D(60))
 
     def test_closing_permissions_and_snapshots(self):
         path = self.add_vehicle("CLOSE")
@@ -290,6 +311,32 @@ class LogbookTests(unittest.TestCase):
         # rovnaké EČV možno po zmazaní znova pridať
         self.add_vehicle("DELETE")
 
+    def test_year_overview(self):
+        first, second = self.add_vehicle("OV1"), self.add_vehicle("OV2")
+        self.assert_status(self.trip(first,150,100))
+        self.assert_status(self.client.post(first+"/fuel",json={"day":"2024-01-20","liters":"30","unit_price":"1.50","vat":"20"}))
+        self.assert_status(self.trip(first,250,150,"2024-02-10"))
+        self.assert_status(self.trip(second,400,100,"2024-03-05"))
+        self.assert_status(self.client.post(first+"/close",params={"month":"2024-01-01"}))   # uzavretý mesiac = snímka
+        data = self.assert_status(self.client.get("/api/overview",params={"year":2024}))
+        ids = [v["id"] for v in self.assert_status(self.client.get("/api/vehicles"))]
+        self.assertEqual([v["id"] for v in data["vehicles"]],ids)                          # správca vidí všetky
+        row = next(v for v in data["vehicles"] if v["id"] == int(first.rsplit("/",1)[1]))
+        months = self.assert_status(self.client.get(first+"/reports",params={"year":2024}))
+        for key in ("distance","gross","purchased","consumption","normative","trip_count","estimated_count"):
+            self.assertEqual(D(str(row[key])),sum(D(str(m[key])) for m in months),key)
+        self.assertEqual((row["distance"],row["refuels"]),(150,1))
+        self.assertEqual(D(str(row["average"])),(sum(D(str(m["consumption"])) for m in months)*100/150).quantize(D("0.01")))
+        self.assertEqual(D(str(row["norm"])),(sum(D(str(m["normative"])) for m in months)*100/150).quantize(D("0.01")))
+        self.assertEqual(row["warnings"],sum(len(r["warnings"]) for m in months for r in m["rows"]))
+        total = data["total"]
+        self.assertEqual(total["distance"],sum(v["distance"] for v in data["vehicles"]))
+        self.assertEqual(D(str(total["per_km"])),(sum(D(str(v["gross"])) for v in data["vehicles"])/total["distance"]).quantize(D("0.001")))
+        alone = self.assert_status(member("prehlad",row["id"]).get("/api/overview",params={"year":2024}))
+        self.assertEqual([v["id"] for v in alone["vehicles"]],[row["id"]])               # bežný používateľ iba svoje
+        self.assertEqual(alone["total"]["distance"],150)
+        self.assertEqual(self.assert_status(self.client.get("/api/overview",params={"year":2030}))["total"]["average"],"0")
+
 
 INVOICE = """Zákaznícke číslo SK10018565 KBM, S.R.O. Súhrnná faktúra
 Dátum faktúry 31.01.2024 ŽITNÁ 13
@@ -318,16 +365,29 @@ Celkom za všetky karty 107,33 24,67 132,00""".splitlines()
 class PerRefuelTests(unittest.TestCase):
     def test_average_from_refuel_to_refuel(self):
         from app.ledger import per_refuel
-        trip = lambda km: {"type": "trip", "distance": km}
-        fuel = lambda liters: {"type": "fuel", "purchased": Decimal(liters)}
-        rows = [trip(50), fuel(40), trip(100), trip(300), fuel(32), trip(80)]
+        trip = lambda km, liters: {"type": "trip", "distance": km, "consumed": Decimal(liters), "rate": Decimal(liters * 100 / km)}
+        fuel = lambda: {"type": "fuel"}
+        rows = [trip(100, 7), trip(100, 9), fuel(), trip(50, 3)]
         per_refuel(rows)
-        self.assertEqual([r["per100"] for r in rows], [Decimal("8.00"), None, Decimal("8.00"), Decimal("8.00"), Decimal("8.00"), Decimal("8.00")])
-        self.assertEqual([r["per100_estimate"] for r in rows], [True, False, False, False, False, True])
-        self.assertEqual(rows[4]["window_km"], 400)
-        rows = [trip(50), fuel(40), trip(100), fuel(10), trip(20)]
-        per_refuel(rows)
-        self.assertEqual((rows[0]["per100"], rows[4]["per100"]), (Decimal("10.00"), Decimal("10.00")))
+        self.assertEqual([r["per100"] for r in rows], [Decimal("7.00"), Decimal("9.00"), Decimal("8.00"), Decimal("6.00")])
+        self.assertEqual([r["per100_estimate"] for r in rows], [False, False, False, True])
+        self.assertEqual(rows[2]["window_km"], 200)
+
+
+class FuelInvoiceParseTests(unittest.TestCase):
+    def test_card_continues_on_next_page(self):
+        from app import fuel_invoice
+        head = ["Číslo karty Meno vodiča ŠPZ", "7002337219961501854 ZA649JX",
+                "Stav km Dátum Čas Číslo Miesto čerpania Mesto Sieť Produkt Množstvo Zľava Jednotková Čiastka Sadzba DPH Čiastka"]
+        lines = [line for line in INVOICE if not line.startswith("Celkom za všetky karty")] + head + [
+            "0 18.09.2026 17:24 077596 Zilina Omv Slovensk Natural 95 35,41 0,00 1,511 53,52 23,00 12,31 65,83",
+            "Strana 4 / 4"] + head + ["Karta celkom 53,52 12,31 65,83", "Celkom za všetky karty 160,85 36,98 197,83"]
+        original = fuel_invoice.lines_of
+        fuel_invoice.lines_of = lambda content: lines
+        self.addCleanup(setattr, fuel_invoice, "lines_of", original)
+        parsed = fuel_invoice.parse(b"%PDF")
+        card = parsed["cards"][-1]
+        self.assertEqual((card["plate"], len(card["rows"]), card["total"]), ("ZA649JX", 1, Decimal("65.83")))
 
 
 class FuelInvoiceTests(unittest.TestCase):

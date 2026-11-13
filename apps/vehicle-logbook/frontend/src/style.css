@@ -123,6 +123,33 @@ p { margin: 5px 0 0; }
 .bar-track { height: 9px; background: var(--track); border-radius: 9px; overflow: hidden; }
 .bar-track i { display: block; height: 100%; background: var(--bar); border-radius: inherit; }
 .chart-row.on .bar-track i { background: var(--green); }
+/* ročný pohľad na Prehľade */
+.segmented.small button { padding: 5px 10px; font-size: .85rem; }
+.chart-row.wide-value { grid-template-columns: 38px minmax(40px,1fr) 92px; }
+.chart-row.wide-value .bar-track { position: relative; overflow: visible; }
+.bar-track i.over, .chart-row.on .bar-track i.over { background: var(--warn); }
+.norm-mark { position: absolute; top: -3px; bottom: -3px; width: 2px; border-radius: 1px; background: var(--ink); }
+.norm-mark.inline { position: static; display: inline-block; height: 12px; vertical-align: -2px; }
+.chart-note { margin: 10px 0 0; font-size: .8rem; }
+.month-status { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 6px; margin-top: 12px; }
+.month-status button { display: flex; align-items: center; justify-content: center; gap: 3px; font: inherit; font-size: .82rem; font-weight: 600; padding: 7px 2px;
+  border-radius: 8px; cursor: pointer; border: 1px solid var(--line); background: var(--surface); color: var(--muted); }
+.month-status button.closed { background: var(--green-soft); border-color: var(--ok-line); color: var(--green); }
+.month-status button.open { background: var(--warn-bg); border-color: var(--accent-line); color: var(--warn-ink); }
+.month-status button.running { border-style: dashed; color: var(--ink); }
+.month-status button.on { outline: 2px solid var(--green); outline-offset: 1px; }
+.status-list { margin: 14px 0 0; display: grid; gap: 0; }
+.status-list > div { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+.status-list dt { color: var(--muted); }
+.status-list dd { margin: 0; font-weight: 700; text-align: right; }
+.status-list dd small { font-weight: 400; margin-left: 4px; }
+.records.fleet .text-warn { font-weight: 700; }
+.records.fleet tr.selected td { background: var(--green-soft); }
+.records.fleet tfoot td { border-top: 2px solid var(--line); font-weight: 700; padding: 10px 12px; }
+@media (max-width: 700px) {
+  .records.fleet tfoot td { padding: 9px 8px; }
+  .chart-row.wide-value { grid-template-columns: 30px minmax(30px,1fr) 84px; gap: 8px; }
+}
 
 /* zoznamy */
 .table-wrap { overflow-x: auto; }

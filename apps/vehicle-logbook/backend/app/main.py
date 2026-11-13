@@ -18,7 +18,7 @@ from . import assistant, distances, exports, fuel_invoice, importer, planner, pu
 from .auth import administrator, current_user, db_session
 from .db import (FuelInvoice, Access, AssistantFile, AssistantSession, Audit, Batch, Closing, Destination, Fuel, Holiday,
                  MonthlyDraft, Trip, User, Vehicle)
-from .ledger import events, ledger, month_of, months, next_month, report, rounded
+from .ledger import events, ledger, month_of, months, next_month, overview, report, rounded
 from .schemas import DestinationIn, FuelIn, TripIn, UserIn, VehicleIn, VehicleDelete, MonthlyPlanIn, MonthlyApproval
 
 app = FastAPI(title="Kniha jázd", docs_url=None, redoc_url=None, openapi_url=None)
@@ -102,12 +102,19 @@ def sign_in():
 def me(user=Member):
     return {"id":user.id,"username":user.username,"name":getattr(user,"display_name",user.username),"admin":user.admin}
 
-@app.get("/api/vehicles")
-def vehicles(db=Db,user=Member):
+def visible_vehicles(db,user):
     query = select(Vehicle).order_by(Vehicle.registration)
     if not user.admin:
         query = query.join(Access).where(Access.user_id == user.id)
-    return json_value([serialized(v) for v in db.scalars(query)])
+    return list(db.scalars(query))
+
+@app.get("/api/vehicles")
+def vehicles(db=Db,user=Member):
+    return json_value([serialized(v) for v in visible_vehicles(db,user)])
+
+@app.get("/api/overview")
+def vehicles_overview(year: int=Query(ge=1900,le=9998),db=Db,user=Member):
+    return json_value(overview(db,visible_vehicles(db,user),year))
 
 @app.post("/api/vehicles")
 @app.put("/api/vehicles/{identifier}")
@@ -189,9 +196,17 @@ def save_trip_row(db,user,vehicle,data,identifier):
     subsequent = [r for r in trips if (r.day,r.end_odo) >= (data.day,data.end_odo)]
     start = prior[-1].end_odo if prior else vehicle.initial_odo
     if data.start_odo is not None and data.start_odo != start:
+        if data.start_odo > start and not subsequent:
+            fail(f"Kniha jázd končí na {start} km, chýba {data.start_odo - start} km. Najprv doplňte jazdy za chýbajúce dni: "
+                 f"otvorte Vyplniť mesiac pre mesiac po poslednej jazde a dnešný stav {data.start_odo} km zadajte ako "
+                 "tachometer na konci s dátumom „Odčítané dňa“.")
         fail(f"Počiatočný tachometer musí nadväzovať na {start} km.")
     if data.end_odo <= start or (subsequent and data.end_odo >= subsequent[0].end_odo):
-        fail("Koncový tachometer musí byť medzi predchádzajúcim a nasledujúcim stavom.")
+        if subsequent:
+            fail(f"Koncový tachometer musí byť viac ako {start} km a menej ako {subsequent[0].end_odo} km, "
+                 f"kde končí nasledujúca jazda ({subsequent[0].day:%d.%m.}). Väčší rozdiel zapíšte ako novú jazdu "
+                 "alebo najprv upravte nasledujúce jazdy.")
+        fail(f"Koncový tachometer musí byť viac ako {start} km (koniec predchádzajúcej jazdy).")
     values.update(start_odo=start,rate=data.rate or (vehicle.city_rate if data.category == "mesto" else vehicle.outside_rate))
     if row:
         for key,value in values.items():

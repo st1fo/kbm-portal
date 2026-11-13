@@ -245,7 +245,7 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
         <TextField size="small" type="date" label="Odčítané dňa" disabled={locked}
           key={'d' + (draft.end_day ?? '')} defaultValue={readDay}
           className={lit.has('odo') ? 'changed-field' : ''} slotProps={{ inputLabel: { shrink: true } }}
-          helperText={draft.end_day ? (close.estimated ? 'po konci mesiaca – zvyšok ide do ďalšieho' : 'jazdy sa navrhnú do tohto dňa') : 'posledný deň mesiaca'}
+          helperText={draft.end_day ? 'jazdy sa navrhnú do tohto dňa' : 'posledný deň mesiaca'}
           onBlur={event => { const value = event.target.value; if (value && value !== readDay)
             void operate([{ action: 'set_odometers', end_day: value }]); }} />
       </div>
@@ -308,6 +308,7 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
           .sort((a, b) => a.odo - b.odo);
         if (draft.tank?.days[info.day] != null) level = Number(draft.tank.days[info.day]);
         const empty = !fuels.length && !books.length && !rows.length;
+        if (info.after_reading && empty) return null;  // za dátumom odčítania tachometra sa nič neplánuje; deň s tankovaním ostane viditeľný
         const off = info.weekend || info.holiday;
         const note = info.before_start ? 'pred začiatkom evidencie' : info.after_reading ? 'po odčítaní tachometra'
           : info.holiday ? 'sviatok' : info.weekend ? 'víkend' : '';
@@ -341,6 +342,7 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
             aria-label={'Pridať k ' + date.getDate() + '. ' + (date.getMonth() + 1) + '.'} onClick={event => setAdding({ anchor: event.currentTarget, day: info.day })}>+</IconButton>}</div>
         </li>;
       })}</ol>
+      {draft.days.some(info => info.after_reading) && <p className="muted">Dni po {new Date(readDay + 'T12:00:00').getDate()}. {new Date(readDay + 'T12:00:00').getMonth() + 1}. ako dátum odčítania tachometra sa nezobrazujú (okrem dní s tankovaním).</p>}
       <Menu anchorEl={adding?.anchor} open={Boolean(adding)} onClose={() => setAdding(undefined)}>
         <MenuItem onClick={() => { const day = adding!.day; setAdding(undefined); void addRow('add_trip', day); }}>Pridať jazdu</MenuItem>
         <MenuItem onClick={() => { const day = adding!.day; setAdding(undefined); void addRow('add_receipt', day); }}>Pridať tankovanie (bloček)</MenuItem>

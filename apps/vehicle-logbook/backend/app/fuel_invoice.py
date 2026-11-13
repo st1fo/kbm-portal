@@ -90,6 +90,8 @@ def parse(content: bytes) -> dict:
             if parts and parts[0].isdigit() and len(parts[0]) >= 12:
                 plate = parts[-1] if len(parts) > 1 and re.fullmatch(r"[A-Z0-9-]{5,10}", parts[-1]) and re.search(r"\d", parts[-1]) else ""
                 driver = " ".join(parts[1:-1] if plate else parts[1:]).title()
+                if card is not None and card["card"] == parts[0] and card["total"] is None:
+                    continue  # karta pokračuje na ďalšej strane: hlavička sa zopakuje, riadky patria tej istej karte
                 card = {"card": parts[0], "plate": plate, "driver": driver, "rows": [], "total": None}
                 cards.append(card)
                 continue

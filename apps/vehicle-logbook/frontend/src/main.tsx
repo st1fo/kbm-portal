@@ -10,6 +10,7 @@ import { DeleteVehicleDialog, destinationFields, fuelFields, RecordDialog, tripF
 import { Icon } from './icons';
 import { FuelInvoiceDialog } from './FuelInvoice';
 import { MonthlyWizard } from './MonthlyWizard';
+import { YearView } from './YearView';
 import { Tour, tourSeen, tourSteps } from './Tour';
 import { nextTheme, themeLabels, useTheme, type ThemeMode, type ThemePref } from './theme';
 import './style.css';
@@ -186,6 +187,7 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
   const [search,setSearch]=useState('');
   const [descending,setDescending]=useState(false);
   const [annual,setAnnual]=useState(false);
+  const [yearView,setYearView]=useState(false);   // Prehľad: mesiac / celý rok
   const [preview,setPreview]=useState(false);   // náhľad PDF výkazu v okne
   const [invoice,setInvoice]=useState(false);   // dialóg faktúry z tankovacích kariet (správca)
   const [signed,setSigned]=useState(()=>localDay());   // dátum pri podpise vo výkaze; prázdny = ručne
@@ -332,7 +334,7 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
     const kindOf=(row:Entry)=>row.type==='fuel'?'fuel' as const:'trips' as const;
     const open=(row:Entry)=>({onClick:()=>openRow(kindOf(row),row),tabIndex:0,role:'button',
       onKeyDown:(e:KeyboardEvent)=>{if(e.key==='Enter')openRow(kindOf(row),row);}});
-    const estimateNote='Predbežne podľa najbližšieho tankovania, spresní sa po ďalšom tankovaní';
+    const estimateNote='Predbežne podľa normy vozidla, spresní sa po ďalšom tankovaní';
     const approx=(row:Entry)=>row.per100_estimate?'≈ ':'';
     const tripUse=(row:Entry)=>per100(row)==null?<span className="muted">—</span>
       :<span title={row.per100_estimate?estimateNote:undefined}>{approx(row)}{fmt(per100(row),1)} l/100 km<small className="muted block">{fmt(used(row))} l</small></span>;
@@ -383,8 +385,8 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
                 <td><span className="route"><Icon name="fuel" size={15}/> Tankovanie {fmt(row.purchased)} l</span>
                   <small className="block">{[row.station,fmt(row.gross)+' €'].filter(Boolean).join(' · ')}</small></td>
                 <td className="nowrap">{row.odo!=null?fmt(row.odo):''}</td>
-                <td className="num">{per100(row)!=null?<small>{fmt(row.window_km)} km</small>:''}</td>
-                <td className="num nowrap">{per100(row)!=null?<b>{fmt(per100(row),1)} l/100 km</b>:'—'}</td>
+                <td className="num"/>
+                <td className="num nowrap">{per100(row)!=null?<><b>{fmt(per100(row),1)} l/100 km</b><small className="block">za {fmt(row.window_km)} km od predošlého tankovania</small></>:'—'}</td>
                 <td className="num">{fmt(row.end_liters,1)} l</td>
                 <td className="actions-cell">{actions(row)}</td></tr>
               : <tr key={String(row.id)} {...open(row)} className={row.nonworking?'weekend':undefined}>
@@ -414,7 +416,13 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
 
   const home=<>
     <PageTitle title="Prehľad" />
-    {gate}{ready&&<>
+    {gate}{ready&&<div className="toolbar"><div className="segmented" role="tablist">
+      <button type="button" role="tab" aria-selected={!yearView} className={!yearView?'on':''} onClick={()=>setYearView(false)}>Mesiac</button>
+      <button type="button" role="tab" aria-selected={yearView} className={yearView?'on':''} onClick={()=>setYearView(true)}>Rok {year}</button>
+    </div></div>}
+    {ready&&yearView&&<YearView year={year} month={month} history={history} vehicle={vehicle!} admin={account.admin} thisMonth={thisMonth} refresh={refresh}
+      onMonth={m=>{setMonth(m);setYearView(false);}} onVehicle={setVehicleId}/>}
+    {ready&&!yearView&&<>
       <div className="quick" data-tour="quick">
         <button type="button" className="quick-tile" disabled={closed} onClick={()=>rowEdit('trips')}><span><Icon name="route" size={22}/></span><b>Pridať jazdu</b><small>Jedna cesta autom</small></button>
         <button type="button" className="quick-tile" disabled={closed} onClick={()=>rowEdit('fuel')}><span><Icon name="fuel" size={22}/></span><b>Pridať tankovanie</b><small>Z bločku</small></button>

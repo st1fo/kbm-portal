@@ -617,7 +617,7 @@ def trips_sheet(book, context):
         sheet.write_blank(row, col, None, book.head())
     row += 1
     sheet.write_string(row, 0, "Červené riadky sú tankovania. l/100 km = natankované litre / km od predošlého tankovania; "
-                       "sivou kurzívou je predbežný priemer jázd, ktoré ďalšie tankovanie ešte neuzavrelo.",
+                       "po každom tankovaní je nádrž plná; sivou kurzívou je spotreba podľa normy pre jazdy, ktoré ďalšie tankovanie ešte neuzavrelo.",
                        book.fmt(border=0, font_size=8, font_color="#4A5560"))
     if estimated:
         row += 1

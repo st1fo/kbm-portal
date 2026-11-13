@@ -428,8 +428,8 @@ class AssistantFlowTests(unittest.TestCase):
             self.assertEqual(previous.end_odo, trip.start_odo)
 
     def test_closing_reading_with_date(self):
-        """The closing odometer may be read on another day: inside the month trips stop there, after the month the
-        state on the last day is estimated by working days. Approval needs the receipt review checkbox."""
+        """The closing odometer may be read on another day: trips stop there, also when it is a day
+        of the next month. Approval needs the receipt review checkbox."""
         from datetime import timedelta
         vehicle = self.ok(self.admin.post("/api/vehicles", json={
             "name": "Odčítanie", "registration": "TEST-READ", "start_date": self.day(1), "initial_odo": 5000,
@@ -443,13 +443,12 @@ class AssistantFlowTests(unittest.TestCase):
         self.assertIn("Návrh jázd zatiaľ nie je vytvorený", draft["messages"][-1]["text"])
         draft = self.chat(sid, f"Koniec 6 000 km, odčítané {read}. Trikrát Martin.", end_odo=6000, end_day=read.isoformat(),
                           routes=[{"destination": "Martin", "count": 3, "category": "mimo mesto", "days": []}])
-        weekdays = lambda a, b: sum(1 for i in range((b - a).days + 1) if (a + timedelta(days=i)).weekday() < 5)
-        expected = 5000 + round(1000 * weekdays(self.month, last) / weekdays(self.month, read))
-        self.assertEqual(draft["closing"], {"day": last.isoformat(), "odo": expected, "estimated": True})
-        self.assertEqual(draft["distance"], expected - 5000)
-        self.assertEqual(sum(t["distance"] for t in draft["trips"]), expected - 5000)
-        self.assertIn("odhadol", " ".join(m["text"] for m in draft["messages"][-2:]))
-        self.assertEqual(len(draft["days"]), last.day)
+        # read after the month: the draft reaches up to that day (also into the next month), nothing is estimated
+        self.assertEqual(draft["closing"], {"day": read.isoformat(), "odo": 6000, "estimated": False})
+        self.assertEqual(draft["distance"], 1000)
+        self.assertEqual(sum(t["distance"] for t in draft["trips"]), 1000)
+        self.assertEqual(draft["days"][-1]["day"], read.isoformat())
+        self.assertEqual(len(draft["days"]), last.day + (read - last).days)
 
         # Read on the 20th: trips only up to that day, later days are marked.
         draft = self.ok(self.admin.post(f"/api/assistant/{sid}/operations", json={"operations": [
