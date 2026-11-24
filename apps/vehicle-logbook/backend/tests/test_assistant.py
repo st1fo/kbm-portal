@@ -658,6 +658,17 @@ class AssistantFlowTests(unittest.TestCase):
         self.assertEqual(result.reply, "OK")
         self.assertEqual(calls, [gemini.model_name(), gemini.fallback_model()])
 
+    def test_openrouter_schema_is_strict(self):
+        from app import openrouter
+        schema = openrouter._strict(gemini.ChatResult.model_json_schema())
+        self.assertEqual(schema["required"], list(schema["properties"]))
+        self.assertFalse(schema["additionalProperties"])
+        self.assertEqual(schema["properties"]["end_odo"], {"type": ["integer", "null"]})
+        operation = schema["$defs"]["OperationWire"]
+        self.assertFalse(operation["additionalProperties"])
+        self.assertIn({"type": "null"}, operation["properties"]["category"]["anyOf"])  # Claude rejects null in an enum type list
+        self.assertNotIn("default", json.dumps(schema))
+
     def test_current_month_and_cross_site_writes_rejected(self):
         today = date.today().replace(day=1)
         self.ok(self.admin.post(f"/api/vehicles/{self.vehicle}/assistant", json={"month": today.isoformat()}), 409)

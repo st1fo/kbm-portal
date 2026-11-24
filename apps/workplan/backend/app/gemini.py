@@ -8,6 +8,8 @@ import logging
 import os
 from pydantic import BaseModel, Field, ValidationError
 
+from . import openrouter
+
 log = logging.getLogger('workplan.gemini')
 DEFAULT_MODEL = 'gemini-3.6-flash'
 TIMEOUT_MS = 60_000   # záložný model; brána čaká 150 s, stačí na oba pokusy
@@ -19,11 +21,13 @@ class AIError(RuntimeError):
 
 
 def model_name():
+    if openrouter.configured():
+        return openrouter.model_name()
     return os.getenv('GEMINI_MODEL', '').strip() or DEFAULT_MODEL
 
 
 def configured():
-    return bool(os.getenv('GEMINI_API_KEY', '').strip())
+    return openrouter.configured() or bool(os.getenv('GEMINI_API_KEY', '').strip())
 
 
 class ItemWire(BaseModel):
@@ -61,6 +65,8 @@ MISSING_KEY = 'AI nie je nastavené: na serveri chýba GEMINI_API_KEY. Aktivity 
 
 
 def _client():
+    if openrouter.configured():
+        return openrouter.client()
     from google import genai
     from google.genai import types
     return genai.Client(api_key=os.environ['GEMINI_API_KEY'].strip(), http_options=types.HttpOptions(timeout=TIMEOUT_MS))
@@ -71,6 +77,8 @@ client_factory = _client   # testy ho nahradia
 
 def fallback_model() -> str:
     """Ľahší model na druhý pokus, keď je hlavný preťažený alebo príliš pomalý."""
+    if openrouter.configured():
+        return openrouter.fallback_model()
     return os.getenv('GEMINI_FALLBACK_MODEL', '').strip() or 'gemini-3.1-flash-lite'
 
 

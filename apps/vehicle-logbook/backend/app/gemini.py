@@ -11,6 +11,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
+from . import openrouter
+
 DEFAULT_MODEL = "gemini-3.6-flash"   # Flash, not Lite: the lite model ignored the structured routes too often
 TIMEOUT_MS = 60_000                  # fallback try; the gateway waits 150 s, enough for both tries
 FIRST_TRY_MS = 40_000                # main model: give up early when it is overloaded, the fallback gets its turn
@@ -22,11 +24,13 @@ class AssistantError(RuntimeError):
 
 
 def model_name():
+    if openrouter.configured():
+        return openrouter.model_name()
     return os.getenv("GEMINI_MODEL", "").strip() or DEFAULT_MODEL
 
 
 def configured():
-    return bool(os.getenv("GEMINI_API_KEY", "").strip())
+    return openrouter.configured() or bool(os.getenv("GEMINI_API_KEY", "").strip())
 
 
 # --- Structured output schemas (kept simple so every Gemini model accepts them) -------------------
@@ -136,6 +140,10 @@ Pravidlá:
   Vyplň iba polia, ktoré sa menia. "To druhé tankovanie" znamená druhý bloček v poradí podľa zoznamu.
   Pri "V Poprade som bol 14. októbra" uprav jazdu do daného cieľa s nepotvrdeným dátumom (datum_potvrdeny=false),
   ktorej dátum je najbližšie k uvedenému dňu; ak taká jazda neexistuje, pridaj ju cez add_trip.
+  Keď používateľ diktuje jazdy po jednej (deň, cieľ, km – napr. „13.10. mesto 53 km“), každú takú správu zapíš hneď
+  ako add_trip (mesto = kategória "mesto", cieľ "Mesto"); v jednej správe môže byť aj viac jázd. Nepýtaj sa, či ide
+  o novú jazdu alebo opravu odhadnutej (nepotvrdenej) jazdy – odhadnuté jazdy systém prispôsobí sám. Pýtaj sa iba
+  vtedy, keď správa naozaj nedáva zmysel.
 - Kilometre a tachometre jázd počíta systém. km v operácii vyplň iba vtedy, keď používateľ výslovne uvedie
   vzdialenosť konkrétnej jazdy.
 - Návrh jázd vytvorí systém sám, keď pozná začiatok, koniec a routes. Bez routes systém žiadne jazdy nevytvorí.
@@ -170,6 +178,8 @@ MISSING_KEY = ("Asistent Gemini nie je nastavený: na serveri chýba GEMINI_API_
 
 
 def _client():
+    if openrouter.configured():
+        return openrouter.client()
     from google import genai
     from google.genai import types
     return genai.Client(api_key=os.environ["GEMINI_API_KEY"].strip(), http_options=types.HttpOptions(timeout=TIMEOUT_MS))
@@ -181,6 +191,8 @@ client_factory = _client
 
 def fallback_model():
     """Lighter model tried once when the main one is overloaded or too slow."""
+    if openrouter.configured():
+        return openrouter.fallback_model()
     return os.getenv("GEMINI_FALLBACK_MODEL", "").strip() or "gemini-3.1-flash-lite"
 
 
