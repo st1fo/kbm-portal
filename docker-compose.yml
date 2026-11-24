@@ -65,6 +65,7 @@ services:
       # Gemini navrhuje aktivity v Denníku (AI doplnenie dňa); kľúč nejde do prehliadača.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
+      GEMINI_FALLBACK_MODEL: ${GEMINI_FALLBACK_MODEL:-}
     depends_on:
       workplan-db:
         condition: service_healthy
@@ -87,6 +88,7 @@ services:
       # Gemini key: only logbook-api and workplan-api receive it; it never reaches the browser.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
+      GEMINI_FALLBACK_MODEL: ${GEMINI_FALLBACK_MODEL:-}
     depends_on:
       logbook-db:
         condition: service_healthy

@@ -24,11 +24,13 @@ def fingerprint(db, vehicle):
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
 
-def month_context(db, vehicle, month, start_odo, end_odo, today, extra=(), replaceable=False, keep_manual=False, stop=None):
+def month_context(db, vehicle, month, start_odo, end_odo, today, extra=(), replaceable=False, keep_manual=False, stop=None,
+                  shorten_next=False):
     """Validate the month and return odometer anchors; `extra` holds (day, odo) from unsaved receipts.
     With `replaceable`, trips of this month saved earlier from a monthly draft are ignored (they get replaced).
     With `keep_manual`, manually entered trips of the month may stay (the caller plans around them).
-    `stop` (day after the closing reading) extends the period into the next month."""
+    `stop` (day after the closing reading) extends the period into the next month. With `shorten_next`, the first later
+    trip may start below the closing reading (the caller moves its start up to the reading when it saves)."""
     if month >= month_of(today):
         raise PlanError("Mesačný návrh vytvorte po skončení mesiaca.")
     stop = stop or next_month(month)
@@ -49,7 +51,8 @@ def month_context(db, vehicle, month, start_odo, end_odo, today, extra=(), repla
     expected = previous[-1].end_odo if previous else vehicle.initial_odo
     if expected != start_odo:
         raise PlanError(f"Počiatočný tachometer musí nadväzovať na evidenciu, očakáva sa {expected} km.")
-    if following and following[0].start_odo != end_odo:
+    if following and following[0].start_odo != end_odo and not (
+            shorten_next and following[0].start_odo < end_odo < following[0].end_odo):
         raise PlanError(f"Nasledujúci mesiac začína na {following[0].start_odo} km. Skontrolujte koncový stav.")
     fuels = [(fuel.day, fuel.odo) for fuel in db.scalars(select(Fuel).where(Fuel.vehicle_id == vehicle.id,
         Fuel.day >= month, Fuel.day < stop, Fuel.odo.is_not(None)))]

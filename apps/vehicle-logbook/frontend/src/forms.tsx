@@ -15,8 +15,8 @@ export const tripFields: Field[] = [
   {key:'destination',label:'Kam'},
   {key:'start_odo',label:'Tachometer na začiatku (km)',type:'number',help:'Doplní sa podľa predchádzajúcej jazdy.'},
   {key:'end_odo',label:'Tachometer na konci (km)',type:'number',required:true},
+  {key:'km',label:'Najazdené km',type:'number',help:'Doplní tachometer na konci.'},
   {key:'purpose',label:'Účel jazdy',wide:true},
-  {key:'rate',label:'Vlastná spotreba (l/100 km)',type:'number',extra:true,help:'Prázdne = norma vozidla.'},
   {key:'note',label:'Poznámka',extra:true,wide:true},
 ];
 export const fuelFields: Field[] = [
@@ -52,8 +52,11 @@ export const destinationFields: Field[] = [
   {key:'distance',label:'Vzdialenosť jedným smerom (km)',type:'number',required:true},
   {key:'note',label:'Poznámka',wide:true},
 ];
+const dayText = (value: unknown) => { const [, month, day] = String(value).split('-'); return `${Number(day)}. ${Number(month)}.`; };
 export type Edit = { title:string; path:string; fields:Field[]; initial:Row;
-  fuel?:{ before:number; city:number; outside:number };   // úprava jazdy: nádrž pred jazdou a normy vozidla
+  // úprava jazdy: nádrž pred jazdou, normy vozidla a úsek do najbližšieho tankovania (ak už je)
+  fuel?:{ before:number; after:number; used:number; city:number; outside:number; distance:number; window?:{ day:string; liters:number; km:number } };
+  fuels?:Row[];   // tankovania mesiaca – pri „Tankoval som cestou“ sa dá vybrať tankovanie z knihy
   destinations?:Row[]; vehicleId?:number; editing?:boolean; onDelete?:()=>void };
 
 export function RecordDialog({ edit, close, done }: { edit: Edit; close:()=>void; done:(saved?:Row)=>void }) {
@@ -62,6 +65,9 @@ export function RecordDialog({ edit, close, done }: { edit: Edit; close:()=>void
     [key, typeof value === 'string' && /^-?\d+\.\d+$/.test(value) && edit.fields.some(f => f.key === key && f.type === 'number') ? String(Number(value)) : value])));
   const [problem,setProblem] = useState('');
   const [busy,setBusy] = useState(false);
+  // tankovanie počas jazdy: jazda sa uloží ako cesta tam, tankovanie a cesta späť
+  const [refuel,setRefuel] = useState<{on:boolean; odo:string; fuel:string; liters:string; gross:string; station:string}>(
+    {on:false,odo:'',fuel:'',liters:'',gross:'',station:''});
   const isTrip = edit.fields === tripFields, isFuel = edit.fields === fuelFields;
   // Ďalšie údaje sú rozbalené, ak už niečo obsahujú.
   const [more,setMore] = useState(() => edit.fields.some(f => f.extra && f.key !== 'vat' && data[f.key] != null && data[f.key] !== ''));
@@ -69,7 +75,7 @@ export function RecordDialog({ edit, close, done }: { edit: Edit; close:()=>void
   function change(key:string,value:string) {
     setData(previous => ({...previous,[key]:value,
       ...(key === 'unit_price' && value ? {gross:''} : key === 'gross' && value ? {unit_price:''} : {}),
-      ...(key === 'category' && value !== previous.category ? {rate:''} : {})}));
+}));
     if (key === 'day' && value && edit.vehicleId && !edit.editing) {
       void api.get('/vehicles/'+edit.vehicleId+'/odometer',{params:{day:value}}).then(({data: defaults}) => {
         setData(previous => previous.day !== value ? previous : {...previous,
@@ -80,10 +86,12 @@ export function RecordDialog({ edit, close, done }: { edit: Edit; close:()=>void
   async function submit(event:FormEvent) {
     event.preventDefault();
     setBusy(true); setProblem('');
-    const body = Object.fromEntries(edit.fields.map(field => {
+    const body: Record<string, unknown> = Object.fromEntries(edit.fields.filter(field => field.key !== 'km').map(field => {
       const value = data[field.key];
       return [field.key,value === '' && (field.type === 'number' || field.type === 'time') ? null : value];
     }));
+    if (isTrip && refuel.on) body.refuel = refuel.fuel ? {odo:Number(refuel.odo),fuel_id:Number(refuel.fuel)}
+      : {odo:Number(refuel.odo),liters:refuel.liters||null,gross:refuel.gross||null,station:refuel.station};
     try {
       const response = await api.request({ method:edit.editing?'put':'post',url:edit.path,data:body });
       done(response.data);
@@ -92,18 +100,25 @@ export function RecordDialog({ edit, close, done }: { edit: Edit; close:()=>void
   }
   const km = isTrip && data.end_odo !== '' && data.end_odo != null && data.start_odo !== '' && data.start_odo != null
     ? Number(data.end_odo) - Number(data.start_odo) : null;
-  // spotreba podľa sadzby jazdy (alebo normy kategórie) a nádrž po jazde – mení sa hneď pri písaní kilometrov
+  // Spotreba sa počíta od tankovania po tankovanie (do plna): pred najbližším tankovaním je to priemer úseku,
+  // po poslednom tankovaní orientačne norma. Pri zmene km sa priemer úseku prepočíta orientačne.
   const fuel = (() => {
     if (!edit.fuel || km == null || km <= 0) return null;
-    const own = Number(data.rate);
-    const rate = data.rate !== '' && data.rate != null && own > 0 ? own : data.category === 'mesto' ? edit.fuel.city : edit.fuel.outside;
-    const used = km * rate / 100;
-    return { rate, used, after: edit.fuel.before - used };
+    const window = edit.fuel.window, windowKm = window ? window.km + km - edit.fuel.distance : 0;
+    const rate = window && windowKm > 0 ? window.liters * 100 / windowKm : data.category === 'mesto' ? edit.fuel.city : edit.fuel.outside;
+    const changed = km !== edit.fuel.distance;   // bez zmeny km presné hodnoty z knihy, inak orientačne
+    return { rate: changed ? rate : edit.fuel.used * 100 / km, used: changed ? km * rate / 100 : edit.fuel.used, after: changed ? null : edit.fuel.after, window, windowKm, changed };
   })();
+  const dayFuels = (edit.fuels ?? []).filter(row => row.day === data.day);
+  const half = data.start_odo != null && data.start_odo !== '' && km != null && km > 0 ? Number(data.start_odo) + Math.round(km / 2) : null;
   const unit = isFuel && Number(data.liters) > 0 && Number(data.gross) > 0 ? Number(data.gross) / Number(data.liters) : null;
   function input(field:Field) {
     const common = {label:field.label,required:field.required,helperText:field.help,
       className:field.wide || field.key === 'note' ? 'wide' : undefined};
+    if (field.key === 'km') return <TextField key="km" label={field.label} helperText={field.help} type="number"
+      value={km ?? ''} disabled={data.start_odo == null || data.start_odo === ''}
+      onChange={event => change('end_odo', event.target.value === '' ? '' : String(Number(data.start_odo) + Number(event.target.value)))}
+      slotProps={{inputLabel:{shrink:true},htmlInput:{step:'1',min:0,inputMode:'numeric'}}} />;
     if (field.key === 'category') return <div key={field.key} className="field-toggle">
       <span>{field.label}</span>
       <ToggleButtonGroup exclusive size="small" color="primary" value={data.category ?? 'mesto'}
@@ -140,8 +155,34 @@ export function RecordDialog({ edit, close, done }: { edit: Edit; close:()=>void
         {problem && <Alert severity="error" sx={{mb:2}}>{problem}</Alert>}
         <div className="form-grid">
           {main.map(field => <FieldBlock key={field.key} field={field}>{input(field)}</FieldBlock>)}
-          {km != null && <p className="wide form-sum">{km > 0 ? <>Vzdialenosť <b>{fmt(km)} km</b>{fuel && <> · spotreba <b>{fmt(fuel.used,1)} l</b>{' '}
-            ({fmt(fuel.rate,1)} l/100 km) · v nádrži po jazde <b className={fuel.after < 0 ? 'text-warn' : undefined}>{fmt(fuel.after,1)} l</b></>}</> : 'Koncový stav musí byť vyšší ako začiatočný.'}</p>}
+          {km != null && <p className="wide form-sum">{km > 0 ? <>Vzdialenosť <b>{fmt(km)} km</b>{fuel && <> · spotreba <b>{fuel.window ? '' : '≈ '}{fmt(fuel.used,1)} l</b>{' '}
+            ({fmt(fuel.rate,1)} l/100 km){fuel.after != null && <> · v nádrži po jazde <b>{fmt(fuel.after,1)} l</b></>}{fuel.window
+              ? <><br/><small className="muted">Priemer od tankovania po tankovanie: {fmt(fuel.window.liters,1)} l natankovaných {dayText(fuel.window.day)} na {fmt(fuel.windowKm)} km{fuel.changed ? ' (orientačne pri zmenených km)' : ''}.</small></>
+              : <><br/><small className="muted">Podľa normy vozidla – spresní sa po ďalšom tankovaní.</small></>}</>}</> : 'Koncový stav musí byť vyšší ako začiatočný.'}</p>}
+          {isTrip && <div className="wide refuel-box">
+            <FormControlLabel control={<Switch checked={refuel.on} onChange={event => setRefuel(previous => ({...previous, on:event.target.checked,
+              odo: previous.odo || (half != null ? String(half) : ''), fuel: previous.fuel || String(dayFuels[0]?.id ?? '')}))} />}
+              label="Tankoval som cestou" />
+            {refuel.on && <><p className="muted">Jazda sa uloží ako cesta tam (po tankovanie), tankovanie a cesta späť – spotreba sa tak rozdelí správne.</p>
+              <div className="form-grid">
+                <TextField label="Tachometer pri tankovaní" type="number" required value={refuel.odo}
+                  helperText={half != null ? `Polovica cesty je ${fmt(half)} km.` : undefined}
+                  onChange={event => setRefuel(previous => ({...previous, odo:event.target.value}))}
+                  slotProps={{inputLabel:{shrink:true},htmlInput:{step:'1',inputMode:'numeric'}}} />
+                <TextField select label="Tankovanie" value={refuel.fuel} onChange={event => setRefuel(previous => ({...previous, fuel:event.target.value}))}
+                  slotProps={{inputLabel:{shrink:true}}}>
+                  {dayFuels.map(row => <MenuItem key={String(row.id)} value={String(row.id)}>{fmt(row.purchased,2)} l · {fmt(row.gross)} €{row.station ? ' · ' + String(row.station) : ''} (v knihe)</MenuItem>)}
+                  <MenuItem value="">Nové tankovanie</MenuItem>
+                </TextField>
+                {!refuel.fuel && <>
+                  <TextField label="Natankované (l)" type="number" required value={refuel.liters} onChange={event => setRefuel(previous => ({...previous, liters:event.target.value}))}
+                    slotProps={{inputLabel:{shrink:true},htmlInput:{step:'any',inputMode:'decimal'}}} />
+                  <TextField label="Suma s DPH (€)" type="number" required value={refuel.gross} onChange={event => setRefuel(previous => ({...previous, gross:event.target.value}))}
+                    slotProps={{inputLabel:{shrink:true},htmlInput:{step:'any',inputMode:'decimal'}}} />
+                  <TextField className="wide" label="Čerpacia stanica" value={refuel.station} onChange={event => setRefuel(previous => ({...previous, station:event.target.value}))}
+                    slotProps={{inputLabel:{shrink:true}}} /></>}
+              </div></>}
+          </div>}
           {unit != null && <p className="wide form-sum">Cena za liter <b>{fmt(unit,3)} €</b></p>}
           {extra.length > 0 && !more && <Button className="wide more-button" onClick={()=>setMore(true)}>+ Ďalšie údaje</Button>}
           {more && extra.map(field => input(field))}

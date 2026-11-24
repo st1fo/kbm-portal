@@ -116,6 +116,26 @@ class LogbookTests(unittest.TestCase):
         self.assertEqual(D(rows[-1]["per100"]), D(12))
         self.assertIn("nad normou", rows[-1]["warnings"][0])
         self.assertEqual(round(D(rows[-1]["end_liters"]),2), D(60))
+        self.assert_status(self.client.post(path+"/close",params={"month":"2024-01-01"}))   # uzavretý mesiac drží sadzby
+        self.assertEqual([D(r["rate"]) for r in self.period(path)["rows"] if r["type"]=="trip"], [D(8),D(6),D(12)])
+
+    def test_refuel_during_trip_splits_it(self):
+        path = self.add_vehicle("SPLIT")   # nádrž 60 l, začiatok 20 l
+        trip = lambda **extra: self.client.post(path+"/trips",json={"day":"2024-01-10","end_odo":400,"category":"mimo mesto",
+            "origin":"Žilina","destination":"BA",**extra})   # noqa: E731
+        self.assertEqual(trip(refuel={"odo":450,"liters":"30","gross":"45"}).status_code,422)   # mimo jazdy
+        self.assert_status(trip(refuel={"odo":220,"liters":"50","gross":"75","station":"OMV/BA"}))
+        rows = self.period(path)["rows"]
+        self.assertEqual([(r["type"],r["start_odo"] if r["type"]=="trip" else r["odo"],r["end_odo"]) for r in rows],
+                         [("trip",100,220),("fuel",220,220),("trip",220,400)])
+        self.assertEqual((rows[2]["origin"],rows[2]["destination"]),("BA","Žilina"))
+        self.assertEqual(round(D(rows[1]["end_liters"]),2),D(60))   # po tankovaní plná
+        self.assertEqual(rows[1]["window_km"],120)                    # cesta späť patrí do ďalšieho úseku
+        fuel = self.assert_status(self.client.post(path+"/fuel",json={"day":"2024-01-12","liters":"40","gross":"60","vat":"20"}))
+        self.assert_status(self.client.post(path+"/trips",json={"day":"2024-01-12","end_odo":700,"category":"mimo mesto",
+            "refuel":{"odo":550,"fuel_id":fuel["id"]}}))   # tankovanie z faktúry dostane tachometer
+        rows = self.period(path)["rows"]
+        self.assertEqual([(r["type"],r["end_odo"]) for r in rows[3:]],[("trip",550),("fuel",550),("trip",700)])
 
     def test_closing_permissions_and_snapshots(self):
         path = self.add_vehicle("CLOSE")

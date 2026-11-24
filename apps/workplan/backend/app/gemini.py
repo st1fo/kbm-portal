@@ -10,7 +10,8 @@ from pydantic import BaseModel, Field, ValidationError
 
 log = logging.getLogger('workplan.gemini')
 DEFAULT_MODEL = 'gemini-3.6-flash'
-TIMEOUT_MS = 60_000   # na jeden pokus; brána čaká 150 s, stačí na hlavný aj záložný model
+TIMEOUT_MS = 60_000   # záložný model; brána čaká 150 s, stačí na oba pokusy
+FIRST_TRY_MS = 40_000 # hlavný model: pri preťažení to rýchlo vzdáme a skúsi sa záložný
 
 
 class AIError(RuntimeError):
@@ -82,7 +83,8 @@ def overloaded(error) -> bool:
 def _config(model: str):
     from google.genai import types
     options = dict(system_instruction=PROMPT, response_mime_type='application/json', response_schema=Proposal,
-                   temperature=0, max_output_tokens=4096)
+                   temperature=0, max_output_tokens=4096,
+                   http_options=types.HttpOptions(timeout=FIRST_TRY_MS if model == model_name() else TIMEOUT_MS))
     if model.startswith('gemini-2.5'):
         options['thinking_config'] = types.ThinkingConfig(thinking_budget=0)
     elif model.startswith('gemini-3'):

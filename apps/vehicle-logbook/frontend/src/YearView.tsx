@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Alert, CircularProgress, Paper } from '@mui/material';
 import { api, errorText, fmt, monthName, plural, type Report, type Row } from './api';
 import { Icon } from './icons';
@@ -14,9 +14,9 @@ const METRICS: Record<Metric,{tab:string;title:string;unit:string;places:number}
 const norm100 = (r:Row) => Number(r.distance) ? Number(r.normative)*100/Number(r.distance) : 0;
 const above = (value:unknown, norm:unknown) => Number(norm)>0 && Number(value)>Number(norm);
 
-export function YearView({ year, month, history, vehicle, admin, thisMonth, refresh, onMonth, onVehicle }:{
+export function YearView({ year, month, history, vehicle, admin, thisMonth, refresh, onMonth, onVehicle, onGo }:{
   year:number; month:number; history:Report[]; vehicle:Row; admin:boolean; thisMonth:string; refresh:number;
-  onMonth:(month:number)=>void; onVehicle:(id:number)=>void }) {
+  onMonth:(month:number)=>void; onVehicle:(id:number)=>void; onGo:(month:number,url:string)=>void }) {
   const [metric,setMetric]=useState<Metric>('distance');
   const [overview,setOverview]=useState<{vehicles:Row[];total:Row}>();
   const [problem,setProblem]=useState('');
@@ -35,6 +35,13 @@ export function YearView({ year, month, history, vehicle, admin, thisMonth, refr
   const warnings=history.reduce((s,r)=>s+r.rows.reduce((n,row)=>n+row.warnings.length,0),0);
   const state=(r:Report)=>r.closed?'closed':String(r.month)>thisMonth||String(r.month)<started?'none':String(r.month)===thisMonth?'running':'open';
   const open=history.filter(r=>state(r)==='open').length;
+  const number=(r:Report)=>Number(String(r.month).slice(5,7));
+  const day=(value:unknown)=>{const [,m,d]=String(value).slice(0,10).split('-'); return `${Number(d)}. ${Number(m)}.`;};
+  // rozkliknutý riadok stavu knihy: položky vedú na stránku, kde sa dajú opraviť
+  const detail=(label:string, value:ReactNode, warn:boolean, items:{key:string;text:ReactNode;month:number;url:string}[])=>
+    <details className="status-detail"><summary><span>{label}</span><b className={warn?'text-warn':''}>{value}</b></summary>
+      {items.length?<ul>{items.map(item=><li key={item.key}><button type="button" onClick={()=>onGo(item.month,item.url)}>{item.text}</button></li>)}</ul>
+        :<p className="muted">Nič na riešenie.</p>}</details>;
 
   return <>
     <div className="two-col">
@@ -56,11 +63,15 @@ export function YearView({ year, month, history, vehicle, admin, thisMonth, refr
         <div className="month-status">{history.map((row,index)=><button type="button" key={String(row.month)} className={state(row)+(index+1===month?' on':'')}
           onClick={()=>onMonth(index+1)} title={{closed:'Uzavretý',open:'Otvorený – treba dokončiť a uzavrieť',running:'Prebiehajúci mesiac',none:'Bez evidencie'}[state(row)]}>
           {state(row)==='closed'&&<Icon name="lock" size={12}/>}{monthName(index+1).slice(0,3)}</button>)}</div>
-        <dl className="status-list">
-          <div><dt>Neuzavreté skončené mesiace</dt><dd className={open?'text-warn':''}>{open}</dd></div>
-          <div><dt>Odhadnuté jazdy</dt><dd>{trips?`${fmt(100*estimated/trips,0)} %`:'–'} <small className="muted">{fmt(estimated)} z {fmt(trips)} {plural(trips,'jazdy','jázd','jázd')}</small></dd></div>
-          <div><dt>Upozornenia v knihe</dt><dd className={warnings?'text-warn':''}>{warnings}</dd></div>
-        </dl>
+        <div className="status-list">
+          {detail('Neuzavreté skončené mesiace',open,open>0,history.filter(r=>state(r)==='open').map(r=>({key:String(r.month),month:number(r),url:'/vykazy',
+            text:<>{monthName(number(r))} <small className="muted">{fmt(r.distance,0)} km · {fmt(r.trip_count)} {plural(Number(r.trip_count),'jazda','jazdy','jázd')}</small></>})))}
+          {detail('Odhadnuté jazdy',<>{trips?`${fmt(100*estimated/trips,0)} %`:'–'} <small className="muted">{fmt(estimated)} z {fmt(trips)} {plural(trips,'jazdy','jázd','jázd')}</small></>,false,
+            history.filter(r=>Number(r.estimated_count)>0).map(r=>({key:String(r.month),month:number(r),url:'/jazdy',
+              text:<>{monthName(number(r))} <small className="muted">{fmt(r.estimated_count)} z {fmt(r.trip_count)} jázd</small></>})))}
+          {detail('Upozornenia v knihe',warnings,warnings>0,history.flatMap(r=>r.rows.flatMap(row=>row.warnings.map((text,index)=>({
+            key:`${row.type}-${row.id}-${index}`,month:number(r),url:'/jazdy',text:<><b>{day(row.day)}</b> {text}</>})))))}
+        </div>
       </Paper>
     </div>
     {admin&&<Paper variant="outlined" className="panel"><h2>Porovnanie vozidiel {year}</h2>

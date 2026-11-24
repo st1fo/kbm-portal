@@ -185,7 +185,7 @@ def odometer(identifier: int, day: date, db=Db,user=Member):
             "vat":23 if day.year >= 2025 else 20}
 
 def save_trip_row(db,user,vehicle,data,identifier):
-    values = data.model_dump()
+    values = data.model_dump(exclude={"refuel"})
     row = row_for(db,Trip,vehicle,identifier) if identifier else None
     before = serialized(row) if row else None
     if row:
@@ -233,7 +233,34 @@ def recalculate_trips(db,vehicle):
 @app.put("/api/vehicles/{vehicle_id}/trips/{identifier}")
 def save_trip(vehicle_id: int,data: TripIn,identifier: int | None=None,db=Db,user=Member):
     vehicle = vehicle_for(db,user,vehicle_id,True)
-    row = save_trip_row(db,user,vehicle,data,identifier)
+    refuel = data.refuel
+    if refuel is None:
+        row = save_trip_row(db,user,vehicle,data,identifier)
+        db.commit()
+        return {"id":row.id}
+    # Tankovanie cestou: jazda tam po tankovanie, tankovanie s tachometrom, jazda späť (spotreba sa delí správne).
+    if refuel.odo >= data.end_odo or (data.start_odo is not None and refuel.odo <= data.start_odo):
+        fail("Tachometer pri tankovaní musí byť medzi začiatkom a koncom jazdy.")
+    if refuel.fuel_id is not None:
+        fuel = row_for(db,Fuel,vehicle,refuel.fuel_id)
+        check_open(db,vehicle,fuel.day)
+        if fuel.day != data.day:
+            fail("Vybrané tankovanie je z iného dňa ako jazda.")
+    elif refuel.liters > vehicle.capacity:
+        fail("Objem tankovania presahuje kapacitu nádrže.")
+    row = save_trip_row(db,user,vehicle,data.model_copy(update={"end_odo":refuel.odo,"refuel":None}),identifier)
+    save_trip_row(db,user,vehicle,data.model_copy(update={"start_odo":refuel.odo,"origin":data.destination,
+        "destination":data.origin,"refuel":None}),None)
+    if refuel.fuel_id is not None:
+        before = serialized(fuel)
+        fuel.odo = refuel.odo
+    else:
+        before = None
+        fuel = Fuel(vehicle_id=vehicle.id,day=data.day,odo=refuel.odo,liters=refuel.liters,gross=rounded(refuel.gross),
+                    vat=Decimal(23 if data.day.year >= 2025 else 20),station=refuel.station,clock="",note="Tankovanie cestou")
+        db.add(fuel)
+    db.flush()
+    audit(db,user,"Tankovanie uložené",vehicle.id,before=before,after=serialized(fuel))
     db.commit()
     return {"id":row.id}
 
@@ -334,6 +361,10 @@ def close(identifier: int,month: date,db=Db,user=Admin):
     starts = [value for value in (next_month(last) if last else None, lock_next) if value]
     current = max(month_of(vehicle.start_date), *starts) if starts else month_of(vehicle.start_date)
     rows = ledger(db,vehicle)
+    # a closed month is frozen: keep the trips' rates from refuel to refuel, not the norm stored when they were entered
+    rates = {r["id"]: r["rate"] for r in rows if r["type"] == "trip" and r["rate"] > 0 and r["day"] < next_month(month).isoformat()}
+    for trip in db.scalars(select(Trip).where(Trip.id.in_(rates))):
+        trip.rate = rates[trip.id]
     while current <= month:
         snapshot = json_value(report(vehicle,rows,current))
         db.add(Closing(vehicle_id=identifier,month=current,snapshot=snapshot))
@@ -555,7 +586,7 @@ def approve_month(identifier: int, draft_id: str, data: MonthlyApproval, db=Db, 
         fail(str(error), 409)
     records = []
     for values in data.rows:
-        fields = values.model_dump()
+        fields = values.model_dump(exclude={"refuel"})
         fields['rate'] = values.rate or (vehicle.city_rate if values.category == 'mesto' else vehicle.outside_rate)
         trip = Trip(vehicle_id=identifier, estimated=True, draft_id=draft.id, **fields)
         db.add(trip)

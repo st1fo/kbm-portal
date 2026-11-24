@@ -33,6 +33,20 @@ class VehicleIn(BaseModel):
 class VehicleDelete(BaseModel):
     registration: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=30)]
 
+class RefuelIn(BaseModel):
+    """Tankovanie počas jazdy: jazda sa rozdelí na cestu tam a späť a tankovanie dostane tento tachometer."""
+    odo: Odo
+    fuel_id: int | None = None     # tankovanie, ktoré už je v knihe (napr. z faktúry FleetCor)
+    liters: Positive | None = None
+    gross: Positive | None = None
+    station: Short = ""
+
+    @model_validator(mode="after")
+    def require_fuel(self):
+        if self.fuel_id is None and (self.liters is None or self.gross is None):
+            raise ValueError("Vyberte tankovanie z knihy alebo zadajte litre a sumu.")
+        return self
+
 class TripIn(BaseModel):
     day: date
     start_odo: Odo | None = None
@@ -43,6 +57,7 @@ class TripIn(BaseModel):
     category: Literal["mesto", "mimo mesto"]
     note: Notes = ""
     rate: Positive | None = None
+    refuel: RefuelIn | None = None
 
 class FuelIn(BaseModel):
     day: date

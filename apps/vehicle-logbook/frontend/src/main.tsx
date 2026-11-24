@@ -251,14 +251,17 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
     if (row) {
       const { warnings: _warnings, ...values } = row;
       // pri jazde: stav nádrže pred ňou a normy vozidla, aby okno ukázalo spotrebu a nádrž po zmene km
-      const fuel=kind==='trips'&&vehicle?{before:Number(row.end_liters)+Number(row.consumed),city:Number(vehicle.city_rate),outside:Number(vehicle.outside_rate)}:undefined;
-      setEdit({...settings,fuel,initial:{...values,liters:row.purchased,unit_price:'',clock:String(row.clock??'').slice(0,5)}});
+      const rows=report?.rows??[], next=rows.slice(rows.findIndex(item=>item.type==='trip'&&item.id===row.id)+1).find(item=>item.type==='fuel');
+      const fuel=kind==='trips'&&vehicle?{before:Number(row.end_liters)+Number(row.consumed),after:Number(row.end_liters),used:Number(row.consumed),city:Number(vehicle.city_rate),outside:Number(vehicle.outside_rate),
+        distance:Number(row.distance),window:next&&!row.per100_estimate&&next.window_km?{day:String(next.day),liters:Number(next.purchased),km:Number(next.window_km)}:undefined}:undefined;
+      setEdit({...settings,fuel,fuels:rows.filter(item=>item.type==='fuel'),initial:{...values,liters:row.purchased,unit_price:'',clock:String(row.clock??'').slice(0,5)}});
       return;
     }
     const today=localDay();
     const day=today.startsWith(String(report?.month))?today:String(report?.month)+'-01';
     void api.get(path+'/odometer',{params:{day}}).then(({data})=>{
-      setEdit({...settings,initial:{day,category:'mesto',start_odo:data.odo,vat:data.vat}});
+      setEdit({...settings,fuels:kind==='trips'?(report?.rows??[]).filter(item=>item.type==='fuel'):undefined,
+        initial:{day,category:'mesto',start_odo:data.odo,vat:data.vat}});
     }).catch(error=>setProblem(errorText(error)));
   }
   function openRow(kind:'trips'|'fuel',row:Entry) {
@@ -421,7 +424,7 @@ function Workspace({account,signOut,themePref,setThemePref}:{account:Account;sig
       <button type="button" role="tab" aria-selected={yearView} className={yearView?'on':''} onClick={()=>setYearView(true)}>Rok {year}</button>
     </div></div>}
     {ready&&yearView&&<YearView year={year} month={month} history={history} vehicle={vehicle!} admin={account.admin} thisMonth={thisMonth} refresh={refresh}
-      onMonth={m=>{setMonth(m);setYearView(false);}} onVehicle={setVehicleId}/>}
+      onMonth={m=>{setMonth(m);setYearView(false);}} onVehicle={setVehicleId} onGo={(m,url)=>{setMonth(m);navigate(url);}}/>}
     {ready&&!yearView&&<>
       <div className="quick" data-tour="quick">
         <button type="button" className="quick-tile" disabled={closed} onClick={()=>rowEdit('trips')}><span><Icon name="route" size={22}/></span><b>Pridať jazdu</b><small>Jedna cesta autom</small></button>

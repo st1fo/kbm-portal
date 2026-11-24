@@ -161,14 +161,17 @@ class AssistantFlowTests(unittest.TestCase):
         draft = self.ok(self.admin.post(f"/api/assistant/{sid}/plan", json={"rebuild": True}))
         self.assert_schedule(draft)
         self.assertEqual(len(draft["trips"]), 5)
-        # Confirmed receipts refuel the draft tank; trips consume their norm (demo: 60 l tank, 6 l/100 km).
+        # Confirmed receipts refuel the draft tank to full (60 l); trips between refuels burn what was refuelled after them.
         tank = draft["tank"]
         self.assertTrue(tank["planned"])
         self.assertEqual(tank["purchased"], "136.4")  # B1 31.4 + B2 40 + saved demo fuels 30 + 35
-        self.assertEqual(tank["consumed"], "62.4")    # 1 040 km × 6 l/100 km
-        self.assertEqual(D(tank["closing"]), D(tank["opening"]) + D(tank["purchased"]) - D(tank["consumed"]))
         self.assertEqual(set(tank["rows"]) >= {"B1", "B2", "J1"}, True)
-        self.assertTrue(any("viac ako nádrž" in w for w in tank["warnings"]))  # 40 l on top of a nearly full tank
+        refuels = [r for r in tank["rows"].values() if r["used"] is None]
+        self.assertTrue(all(D(r["after"]) == D(tank["capacity"]) for r in refuels))   # vždy do plna
+        self.assertTrue(all(D(v) >= 0 for v in tank["days"].values()), tank["days"])
+        trips = [r for r in tank["rows"].values() if r["used"] is not None]
+        self.assertTrue(all(D(r["after"]) == D(r["before"]) - D(r["used"]) for r in trips))
+        self.assertTrue(any(r.get("estimate") for r in trips) or all(r.get("window") for r in trips))
         self.assertIn("Nádrž: začiatok", draft["messages"][-1]["text"])
         self.assertTrue(draft["can_approve"])
         self.assertTrue(all(not t["day_confirmed"] for t in draft["trips"]))
@@ -353,7 +356,7 @@ class AssistantFlowTests(unittest.TestCase):
         sid = self.ok(self.admin.post(f"/api/vehicles/{vehicle['id']}/assistant", json={"month": self.month.isoformat()}))["id"]
         draft = self.chat(sid, "Začiatok -5 km", start_odo=-5)
         self.assertEqual(draft["start_odo"], 1000)  # prefilled from the logbook, the invalid value is ignored
-        self.assertIn("mimo povoleného rozsahu", draft["messages"][-1]["text"])
+        self.assertIn("nezapísal", draft["messages"][-1]["text"])
         draft = self.chat(sid, "1000 až 1600, Košice a dvakrát Poprad", start_odo=1000, end_odo=1600, routes=[
             {"destination": "Košice", "count": 1, "category": "mimo mesto", "days": []},
             {"destination": "Poprad", "count": 2, "category": "mimo mesto", "days": []}])
@@ -471,6 +474,92 @@ class AssistantFlowTests(unittest.TestCase):
             trips = list(db.scalars(select(Trip).where(Trip.vehicle_id == vehicle["id"])))
         self.assertEqual(max(t.end_odo for t in trips), 6000)
 
+    def test_invented_reading_and_stale_start(self):
+        """The model may not invent a closing reading; the opening one always follows the logbook."""
+        from datetime import timedelta
+        vehicle = self.ok(self.admin.post("/api/vehicles", json={
+            "name": "Vymyslený stav", "registration": "TEST-INVENT", "start_date": (self.month - timedelta(days=1)).replace(day=1).isoformat(),
+            "initial_odo": 7000, "capacity": 60, "initial_liters": 30, "city_rate": 7, "outside_rate": 6}))
+        sid = self.ok(self.admin.post(f"/api/vehicles/{vehicle['id']}/assistant", json={"month": self.month.isoformat()}))["id"]
+        draft = self.chat(sid, "Navrhni nejaké jazdy.", end_odo=8531)
+        self.assertIsNone(draft["end_odo"])
+        self.assertIn("neuviedli", draft["messages"][-1]["text"])
+        draft = self.chat(sid, "Najazdil som 1 531 km.", end_odo=8531)   # start + km driven is accepted
+        self.assertEqual(draft["end_odo"], 8531)
+        with Session() as db:   # the previous month changes after the draft was opened
+            db.add(Trip(vehicle_id=vehicle["id"], day=self.month - timedelta(days=3), start_odo=7000, end_odo=7300, origin="Žilina",
+                        destination="Martin", purpose="", category="mimo mesto", note="", rate=D("6")))
+            db.commit()
+        draft = self.ok(self.admin.get(f"/api/assistant/{sid}"))
+        self.assertEqual(draft["start_odo"], 7300)
+        self.ok(self.admin.post(f"/api/assistant/{sid}/operations", json={"operations": [
+            {"action": "set_odometers", "start_odo": 7000}]}), 422)
+
+    def test_shorten_next_trip(self):
+        """A later trip that swallowed this month's km (it starts where the previous month ended) can be shortened
+        to start at the closing reading, in the approval transaction."""
+        from datetime import timedelta
+        vehicle = self.ok(self.admin.post("/api/vehicles", json={
+            "name": "Skrátiť", "registration": "TEST-SHORT", "start_date": (self.month - timedelta(days=1)).replace(day=1).isoformat(),
+            "initial_odo": 9000, "capacity": 60, "initial_liters": 30, "city_rate": 7, "outside_rate": 6}))
+        later = (self.month + timedelta(days=32)).replace(day=2)
+        with Session() as db:
+            db.add(Trip(vehicle_id=vehicle["id"], day=later, start_odo=9000, end_odo=11000, origin="Žilina", destination="mesto",
+                        purpose="", category="mesto", note="", rate=D("7")))
+            db.commit()
+        sid = self.ok(self.admin.post(f"/api/vehicles/{vehicle['id']}/assistant", json={"month": self.month.isoformat()}))["id"]
+        draft = self.chat(sid, "Koniec 9 600, dvakrát Martin.", end_odo=9600,
+                          routes=[{"destination": "Martin", "count": 2, "category": "mimo mesto", "days": []}])
+        self.assertEqual(draft["trips"], [])
+        self.assertIn("Skrátiť jazdu", draft["messages"][-1]["text"])
+        self.assertEqual(draft["next_trip"]["can_shorten"], True)
+        draft = self.ok(self.admin.post(f"/api/assistant/{sid}/operations", json={"operations": [
+            {"action": "set_shorten_next", "replace": True}]}))
+        self.assertEqual(sum(t["distance"] for t in draft["trips"]), 600)
+        self.assertTrue(draft["can_approve"], draft["problems"])
+        self.ok(self.admin.post(f"/api/assistant/{sid}/approve", json={"version": draft["version"]}))
+        with Session() as db:
+            trip = db.scalar(select(Trip).where(Trip.vehicle_id == vehicle["id"], Trip.day == later))
+        self.assertEqual((trip.start_odo, trip.end_odo), (9600, 11000))
+
+    def test_reorder_day(self):
+        """Dragging rows of a day: draft trips swap, a refuel without an odometer lands between them and keeps that
+        place in the logbook (its odometer is written from the position at approval)."""
+        from datetime import timedelta
+        vehicle = self.ok(self.admin.post("/api/vehicles", json={
+            "name": "Poradie", "registration": "TEST-ORDER", "start_date": (self.month - timedelta(days=1)).replace(day=1).isoformat(),
+            "initial_odo": 5000, "capacity": 60, "initial_liters": 30, "city_rate": 7, "outside_rate": 6}))
+        sid = self.ok(self.admin.post(f"/api/vehicles/{vehicle['id']}/assistant", json={"month": self.month.isoformat()}))["id"]
+        draft = self.chat(sid, "Koniec 5 300, 10. Martin a Košice.", end_odo=5300, routes=[
+            {"destination": "Martin", "count": 1, "category": "mimo mesto", "days": [self.day(10)]},
+            {"destination": "Košice", "count": 1, "category": "mimo mesto", "days": [self.day(10)]}], create_plan=True)
+        draft = self.ok(self.admin.post(f"/api/assistant/{sid}/operations", json={"operations": [
+            {"action": "add_receipt", "day": self.day(10), "liters": "20", "gross": "33"}]}))
+        first, second = [t["id"] for t in draft["trips"]]
+        self.assertEqual([r for r in draft["tank"]["order"] if r in {first, second, "B1"}], [first, second, "B1"])
+        ops = lambda rows: {"operations": [{"action": "reorder", "day": self.day(10), "rows": rows}]}  # noqa: E731
+        self.ok(self.admin.post(f"/api/assistant/{sid}/operations", json=ops([second, "B1"])), 422)   # a row is missing
+        draft = self.ok(self.admin.post(f"/api/assistant/{sid}/operations", json=ops([second, "B1", first])))
+        trips = {t["id"]: t for t in draft["trips"]}
+        self.assertEqual(draft["tank"]["order"], [second, "B1", first])
+        self.assertEqual(trips[second]["start_odo"], 5000)
+        self.assertEqual(trips[first]["start_odo"], trips[second]["end_odo"])
+        self.assertEqual(draft["tank"]["rows"]["B1"]["km"], trips[second]["distance"])   # the refuel closes the window after it
+        self.assertNotIn("status", draft["tank"]["rows"]["B1"])   # 20 l cannot fill the tank: no km hint, the litres are wrong
+        draft = self.ok(self.admin.post(f"/api/assistant/{sid}/operations", json={"operations": [
+            {"action": "update_receipt", "row": "B1", "liters": "45"}]}))
+        hint = draft["tank"]["rows"]["B1"]   # km the window lacks for the norm: burned litres × 100 / norm − km
+        self.assertEqual(hint["norm_km"], int(D(hint["burned"]) * 100 / D(6)))
+        self.assertEqual(hint["gap"], round(hint["norm_km"] - hint["km"], -1))
+        self.assertEqual(hint["status"] == "ok", hint["hint"] is None)
+        if hint["status"] != "ok":
+            self.assertIn("treba asi", hint["hint"])
+        saved = self.ok(self.admin.post(f"/api/assistant/{sid}/approve", json={"version": draft["version"], "receipts_checked": True}))
+        self.assertEqual(saved["status"], "saved")
+        with Session() as db:
+            fuel = db.scalar(select(Fuel).where(Fuel.vehicle_id == vehicle["id"]))
+        self.assertEqual(fuel.odo, trips[second]["end_odo"])
+
     def test_invent_trips_from_history(self):
         """„Vymysli jazdy“: when the model returns no destinations, the vehicle's frequent ones are used."""
         from datetime import timedelta
@@ -518,7 +607,7 @@ class AssistantFlowTests(unittest.TestCase):
                   {"destination": "Košice", "count": 2, "approximate_km": 480, "category": "mimo mesto", "days": []}]
         for end, short in ((11800, False), (12400, True)):  # 120 l of fuel lasts 2 000 km at 6 l/100 km
             sid = self.ok(self.admin.post(f"/api/vehicles/{vehicle['id']}/assistant", json={"month": self.month.isoformat()}))["id"]
-            draft = self.chat(sid, "Koniec a ciele", end_odo=end, routes=routes)
+            draft = self.chat(sid, f"Koniec {end} a ciele", end_odo=end, routes=routes)
             self.assertEqual(sum(t["distance"] for t in draft["trips"]), end - 10000)
             self.assertEqual(draft["problems"], [])
             warnings = draft["tank"]["warnings"]

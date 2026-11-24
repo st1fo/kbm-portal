@@ -95,7 +95,7 @@ def read(w, digest):
                     if not isinstance(rate,(int,float)) or rate < 0.1:
                         rate = config["city_rate" if d == "mesto" else "outside_rate"]
                 trip = TripIn(day=dt, start_odo=start, end_odo=end, category=d, destination=str(b or ""),
-                    note=str(c or ""), rate=dec(rate)).model_dump()
+                    note=str(c or ""), rate=dec(rate)).model_dump(exclude={"refuel"})
                 trip.update(legacy_row=i, estimated=estimated)
             except (ValueError, TypeError):
                 warnings.append(f"cesty, riadok {i}. Neplatné údaje jazdy, riadok vynechaný.")

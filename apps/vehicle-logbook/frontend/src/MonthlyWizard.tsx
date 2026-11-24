@@ -3,6 +3,9 @@ import {
   Alert, Button, Checkbox, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Menu, MenuItem,
   FormControlLabel, Paper, Switch, Tab, Tabs, TextField, Tooltip, useMediaQuery,
 } from '@mui/material';
+import { DndContext, MouseSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { api, dateLabel, errorText, fmt, monthName, plural, type Row } from './api';
 
 type FileItem = { id:string; name:string; mime:string; size:number; status:'pending'|'done'|'error'; error:string|null; url:string };
@@ -11,7 +14,7 @@ type Receipt = { id:string; file_id:string|null; day:string|null; station:string
 type Trip = { id:string; day:string; destination:string; category:string; purpose:string; distance:number;
   start_odo:number; end_odo:number; day_confirmed:boolean; km_confirmed:boolean; warning:string|null };
 type SavedTrip = { key:string; day:string; destination:string; distance:number; start_odo:number; end_odo:number };
-type SavedFuel = { key:string; day:string; station:string; liters:string; gross:string; note:string };
+type SavedFuel = { key:string; day:string; station:string; liters:string; gross:string; note:string; odo:number|null };
 type Message = { role:'user'|'assistant'|'error'; text:string; changed:string[] };
 type Route = { destination:string; count:number; approximate_km:number|null };
 type Day = { day:string; holiday:boolean; weekend:boolean; before_start:boolean; after_reading:boolean };
@@ -20,12 +23,22 @@ type Draft = { id:string; status:'draft'|'saved'; version:number; month:string; 
   files:FileItem[]; receipts:Receipt[]; receipt_problems:string[]; trips:Trip[];
   problems:string[]; stale:boolean; messages:Message[]; highlight:string[]; routes:Route[];
   can_approve:boolean; origin:string; replace_existing:boolean;
+  next_trip:{ day:string; destination:string; start_odo:number; end_odo:number; can_shorten:boolean; on:boolean }|null;
   existing:{replaceable:number; manual:number; km:number; manual_km:number};
   saved:{km:number; trips:SavedTrip[]; fuels:SavedFuel[]};
   tank:{opening:string; purchased:string; closing:string; planned:boolean; days:Record<string,string>; warnings:string[];
-    rows:Record<string,{before:string; after:string; used:string|null; per100?:string|null; km?:number; window?:string}>}|null;
+    rows:Record<string,{before:string; after:string; used:string|null; per100?:string|null; km?:number; burned?:string; window?:string; estimate?:boolean;
+      norm_km?:number; gap?:number; status?:'ok'|'low'|'high'; hint?:string|null}>; order:string[]}|null;
   assistant:{configured:boolean; model:string}; limits:{file_mb:number; files:number; message:number; types:string[]} };
 type Operation = Record<string, string | number | boolean | string[] | null | undefined> & { action:string };
+
+/** Riadok dňa, ktorý sa dá potiahnuť (myšou alebo podržaním prsta) na iné miesto v poradí. */
+function SortRow({ id, disabled, children }: { id:string; disabled:boolean; children:ReactNode }) {
+  const { setNodeRef, listeners, transform, transition, isDragging } = useSortable({ id, disabled });
+  return <div ref={setNodeRef} id={'md-' + id} style={{ transform: CSS.Transform.toString(transform), transition }}
+    className={'md-sort' + (disabled ? '' : ' movable') + (isDragging ? ' dragging' : '')}
+    title={disabled ? undefined : 'Potiahnutím zmeníte poradie v rámci dňa'} {...(disabled ? {} : listeners)}>{children}</div>;
+}
 
 const receiptLabels: Record<string,string> = { day:'dátum', liters:'litre', gross:'suma', currency:'mena', station:'stanica', odo:'tachometer' };
 
@@ -62,10 +75,14 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
   const [editing, setEditing] = useState<{ kind:'trip'|'receipt'; id:string }>();
   const [kmDraft, setKmDraft] = useState<string>();   // kilometre práve písané v okne jazdy (živý prepočet nádrže)
   useEffect(() => setKmDraft(undefined), [editing?.id]);
+  const [hintOpen, setHintOpen] = useState<string>();   // tankovanie, pri ktorom je rozbalený tip k norme
   const [adding, setAdding] = useState<{ anchor:HTMLElement; day:string }>();
   const [checked, setChecked] = useState(false);
   const mobile = useMediaQuery('(max-width:900px)');
   const queue = useRef(Promise.resolve());
+  const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 8 } }));
+  const dragged = useRef(false);   // po potiahnutí myšou nasleduje klik – nesmie otvoriť úpravu riadku
   const chatEnd = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const base = draft ? '/assistant/' + draft.id : '';
@@ -175,31 +192,33 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
   const close = draft.closing;
   const bookFuel = saved ? [] : draft.saved.fuels;
   const issues = [...draft.receipt_problems, ...draft.problems, ...(draft.tank?.warnings ?? [])];
-  // spotreba jazdy podľa normy vozidla (ako stĺpec spotreby v pôvodnom Exceli)
-  /** Spotreba jazdy a stav nádrže po nej a na konci dňa; počas písania kilometrov orientačný prepočet. */
+  /** Spotreba jazdy a stav nádrže po nej a na konci dňa; počas písania kilometrov orientačný prepočet.
+   *  Tankuje sa do plna, takže jazdy medzi tankovaniami spotrebujú, čo sa potom dotankovalo (burned pri tankovaní). */
   const fuelInfo = (item: Trip) => {
     const row = draft.tank?.rows[item.id], end = draft.tank?.days[item.day];
     if (!draft.tank?.planned || !row || row.used == null) return null;
-    const rate = Number(item.category === 'mesto' ? vehicle.city_rate : vehicle.outside_rate);
     const typed = kmDraft != null && kmDraft.trim() !== '' && Number(kmDraft) >= 0 ? Number(kmDraft) : null;
-    const change = typed == null ? 0 : typed * rate / 100 - Number(row.used);
-    const value = (base: string | number | undefined) => fmt(Number(base ?? 0) - change, 1) + ' l';
     const window = row.window ? draft.tank.rows[row.window] : undefined;
-    const refuel = row.window ? Number(draft.receipts.find(r => r.id === row.window)?.liters ?? draft.saved.fuels.find(f => f.key === row.window)?.liters ?? 0) : 0;
     const windowKm = window?.km != null ? window.km + (typed == null ? 0 : typed - item.distance) : null;
+    const average = window?.burned != null && windowKm ? Number(window.burned) * 100 / windowKm : null;
+    const norm = Number(item.category === 'mesto' ? vehicle.city_rate : vehicle.outside_rate);
+    // po poslednom tankovaní sa ráta podľa normy, inak sa mení len priemer okna (nádrž pri tankovaní je plná)
+    const change = typed == null || window ? 0 : typed * norm / 100 - Number(row.used);
+    const value = (base: string | number | undefined) => fmt(Number(base ?? 0) - change, 1) + ' l';
     return <div className={'trip-fuel' + (typed != null && typed !== item.distance ? ' typed' : '')}>
-      {windowKm != null && windowKm > 0 && refuel > 0
-        ? <div><span>Priemer medzi tankovaniami</span><b>{fmt(refuel * 100 / windowKm, 1)} l/100 km</b><small>{fmt(windowKm, 0)} km, {fmt(refuel, 1)} l</small></div>
-        : <div><span>Priemer medzi tankovaniami</span><small>po tejto jazde už v mesiaci nie je tankovanie</small></div>}
-      <div><span>Spotreba podľa normy</span><b>{fmt(Number(row.used) + change, 1)} l</b><small>{fmt(rate, 1)} l/100 km</small></div>
+      {average != null
+        ? <div><span>Priemer medzi tankovaniami</span><b>{fmt(average, 1)} l/100 km</b><small>{fmt(windowKm, 0)} km, {fmt(window?.burned, 1)} l · norma {fmt(norm, 1)}</small></div>
+        : <div><span>Priemer medzi tankovaniami</span><small>po tejto jazde už v mesiaci nie je tankovanie – spotreba podľa normy {fmt(norm, 1)} l/100 km</small></div>}
+      <div><span>Spotreba jazdy</span><b>{fmt(typed != null && average != null ? typed * average / 100 : Number(row.used) + change, 1)} l</b></div>
       <div><span>V nádrži po jazde</span><b>{value(row.after)}</b></div>
       <div><span>Na konci dňa</span><b>{value(end)}</b></div>
       {typed != null && typed !== item.distance && <small className="muted">Orientačne pri {fmt(typed, 0)} km. Po uložení sa prepočítajú aj ďalšie dni;
         kilometre ostatných jázd sa upravia tak, aby súčet sedel s tachometrom.</small>}
     </div>;
   };
-  const used = (id: string) => draft.tank?.rows[id]?.per100 != null
-    ? <span className="md-fuel" title="Priemerná spotreba medzi tankovaniami"> · {fmt(draft.tank.rows[id].per100, 1)} l/100 km</span> : null;
+  const used = (id: string) => { const row = draft.tank?.rows[id];
+    return row?.per100 != null ? <span className="md-fuel" title={row.estimate ? 'Predbežne podľa normy vozidla, spresní sa po ďalšom tankovaní'
+      : 'Spotreba od tankovania po tankovanie (nádrž sa tankuje do plna)'}> · {row.estimate ? '≈ ' : ''}{fmt(row.per100, 1)} l/100 km</span> : null; };
   /** Pri tankovaní: koľko km sa prešlo od predošlého tankovania a priemer na 100 km. */
   const sinceRefuel = (id: string) => { const row = draft.tank?.rows[id];
     return row?.per100 != null ? <small className="md-per100"> · {fmt(row.km, 0)} km od predošlého · <b>{fmt(row.per100, 1)} l/100 km</b></small> : null; };
@@ -217,16 +236,62 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
   const readDay = draft.end_day ?? draft.days[draft.days.length - 1].day;
   let level = draft.tank ? Number(draft.tank.opening) : 0;
 
+  /** Štítok pri tankovaní: koľko km chýba alebo prebýva v jazdách od predošlého tankovania, aby priemer sedel s normou. */
+  const normChip = (id: string) => { const row = draft.tank?.rows[id];
+    if (!draft.tank?.planned || !row?.status) return null;
+    const label = row.status === 'ok' ? (mobile ? '✓' : '✓ v norme')
+      : (row.status === 'low' ? '▲ +' : '▼ −') + fmt(Math.abs(row.gap ?? 0), 0) + (mobile ? '' : ' km');
+    const toggle = (event: { stopPropagation: () => void }) => { event.stopPropagation(); if (row.hint) setHintOpen(hintOpen === id ? undefined : id); };
+    return <span className={'md-tag norm ' + row.status} role={row.hint ? 'button' : undefined} tabIndex={row.hint ? 0 : undefined}
+      aria-expanded={row.hint ? hintOpen === id : undefined}
+      title={row.status === 'ok' ? 'Priemer od predošlého tankovania je blízko normy' : 'Koľko km chýba / prebýva do normy – ťuknite pre tip'}
+      onClick={toggle} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(event); } }}>{label}</span>;
+  };
+  const normHint = (id: string) => { const text = draft.tank?.rows[id]?.hint;
+    return hintOpen === id && text ? <div className="md-hint">{text}</div> : null; };
+  const offNorm = draft.tank?.planned ? draft.tank.order.filter(id => draft.tank!.rows[id]?.hint) : [];
+
   const receiptButton = (item: Receipt) => <button key={rowKey(item.id)} type="button" disabled={locked}
     className={'md-item fuel' + (lit.has(item.id) ? ' changed' : '') + (item.missing.length || (item.duplicate && !item.duplicate_ok) ? ' bad' : '')}
     onClick={() => setEditing({ kind: 'receipt', id: item.id })}>
     <span className="md-icon" aria-hidden>⛽</span>
     <span className="md-main">{item.liters ? fmt(item.liters, 2) + ' l' : 'litre ?'} · {item.gross ? fmt(item.gross, 2) + ' €' : 'suma ?'}
       {item.station && <small> · {item.station}</small>}{sinceRefuel(item.id)}</span>
-    <span className="md-tags"><span className="md-tag">bloček {item.id}</span>
+    <span className="md-tags">{normChip(item.id)}<span className="md-tag">bloček {item.id}</span>
       {item.missing.length > 0 && <span className="md-tag bad">doplniť</span>}
       {item.duplicate && !item.duplicate_ok && <span className="md-tag bad">možná duplicita</span>}</span>
   </button>;
+
+  const tripButton = (item: Trip) => <button type="button" disabled={locked}
+    className={'md-item trip' + (lit.has(item.id) ? ' changed' : '') + (item.warning ? ' warn' : '')}
+    onClick={() => setEditing({ kind: 'trip', id: item.id })}>
+    <span className="md-main"><b>{item.destination}</b> · {fmt(item.distance, 0)} km{used(item.id)}
+      <small> · {fmt(item.start_odo, 0)} → {fmt(item.end_odo, 0)}</small></span>
+    <span className="md-tags">
+      <span className={'md-tag' + (item.day_confirmed && item.km_confirmed ? ' sure' : '')}>
+        {item.day_confirmed && item.km_confirmed ? 'potvrdené' : item.day_confirmed ? 'deň potvrdený' : item.km_confirmed ? 'km potvrdené' : 'odhad'}</span>
+      {item.warning && <Tooltip title={item.warning}><span className="md-tag bad">⚠</span></Tooltip>}</span>
+  </button>;
+  const bookTripRow = (book: SavedTrip) => <div className="md-item trip book">
+    <span className="md-main"><b>{book.destination || 'jazda'}</b> · {fmt(book.distance, 0)} km{used(book.key)}
+      <small> · {fmt(book.start_odo, 0)} → {fmt(book.end_odo, 0)}</small></span>
+    <span className="md-tags"><span className="md-tag book">v knihe</span></span></div>;
+  const bookFuelRow = (item: SavedFuel) => <div className="md-item fuel book">
+    <span className="md-icon" aria-hidden>⛽</span>
+    <span className="md-main">{fmt(item.liters, 2)} l · {fmt(item.gross, 2)} €<small> · {item.station}</small>{sinceRefuel(item.key)}</span>
+    <span className="md-tags">{normChip(item.key)}<Tooltip title={item.note || 'kniha jázd'}><span className="md-tag book">v knihe</span></Tooltip></span></div>;
+  const order = draft.tank?.order ?? [];
+  const rank = (id: string) => { const at = order.indexOf(id); return at < 0 ? order.length : at; };
+  const dayIds: Record<string, string[]> = {};   // poradie riadkov každého dňa, ako sú zobrazené (pre presúvanie)
+  /** Pustenie riadku: nové poradie dňa ide na server; riadok pustený na iný deň sa ignoruje. */
+  const dropRow = ({ active, over }: DragEndEvent) => {
+    setTimeout(() => { dragged.current = false; });
+    const from = String(active.id), to = over ? String(over.id) : '';
+    const day = Object.keys(dayIds).find(key => dayIds[key].includes(from));
+    if (!day || from === to || !dayIds[day].includes(to)) return;
+    const ids = dayIds[day];
+    void operate([{ action: 'reorder', day, rows: arrayMove(ids, ids.indexOf(from), ids.indexOf(to)) }]);
+  };
 
   const previewPanel = <section className="wizard-preview" aria-label="Náhľad mesiaca">
     <Paper variant="outlined" className="panel">
@@ -267,6 +332,13 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
         <div><FormControlLabel control={<Switch checked={draft.replace_existing} disabled={locked}
           onChange={event => void operate([{ action: 'set_replace', replace: event.target.checked }])} />}
           label="Nahradiť uložený odhad týmto návrhom (staré jazdy sa odstránia až pri schválení)" /></div></Alert>}
+      {!saved && draft.next_trip?.can_shorten && <Alert severity={draft.next_trip.on ? 'info' : 'warning'} sx={{ mt: 1.5 }}
+        className={lit.has('odo') ? 'changed-field' : ''}>
+        V knihe je jazda {dateLabel(draft.next_trip.day)} ({draft.next_trip.destination || 'bez cieľa'}) od {fmt(draft.next_trip.start_odo, 0)} km,
+        ale tento mesiac končí na {fmt(draft.end_odo, 0)} km.
+        <div><FormControlLabel control={<Switch checked={draft.next_trip.on} disabled={locked}
+          onChange={event => void operate([{ action: 'set_shorten_next', replace: event.target.checked }])} />}
+          label={`Skrátiť jazdu ${dateLabel(draft.next_trip.day)}: pri uložení bude ${fmt(draft.end_odo, 0)} → ${fmt(draft.next_trip.end_odo, 0)} km`} /></div></Alert>}
       {draft.routes.length > 0 && <div className={'actions routes' + (lit.has('routes') ? ' changed-field' : '')}>
         <span className="muted">Opis mesiaca:</span>
         {draft.routes.map(route => <Chip key={route.destination} size="small" variant="outlined"
@@ -277,6 +349,9 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
 
     <Paper variant="outlined" className="panel">
       <div className="summary-strip"><h2>Mesiac po dňoch</h2>
+        {!saved && offNorm.length > 0 && <Chip size="small" color="warning" variant="outlined"
+          label={`${offNorm.length} ${plural(offNorm.length, 'úsek', 'úseky', 'úsekov')} mimo normy`}
+          onClick={() => { setHintOpen(offNorm[0]); document.getElementById('md-' + offNorm[0])?.scrollIntoView({ block: 'center', behavior: 'smooth' }); }} />}
         {!saved && draft.trips.length > 0 && <div className="actions">
           {draft.stale && <Button size="small" variant="contained" disabled={locked}
             onClick={() => void run('Prepočítavam…', async () => (await api.post(base + '/plan', { rebuild: false })).data)}>Prepočítať</Button>}
@@ -299,49 +374,39 @@ export function MonthlyWizard({ vehicle, month, exportUrl, onSaved }:
         <ul className="tight">{issues.map(item => <li key={item}>{item}</li>)}</ul></Alert>}
       {undated.length > 0 && <div className="md-undated"><b>Bločky bez dátumu:</b> {undated.map(receiptButton)}</div>}
       {draft.tank?.planned && <div className="md-head" aria-hidden><span>Deň</span><span>Jazdy a tankovania</span><span>Nádrž večer</span><span/></div>}
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={() => { dragged.current = true; }}
+        onDragEnd={dropRow} onDragCancel={() => setTimeout(() => { dragged.current = false; })}>
       <ol className="month-days">{draft.days.map(info => {
         const date = new Date(info.day + 'T12:00:00');
-        const fuels = draft.receipts.filter(item => item.day === info.day);
-        const books = bookFuel.filter(item => item.day.slice(0, 10) === info.day);
-        const rows = [...draft.trips.filter(item => item.day === info.day).map(item => ({ odo: item.start_odo, item, book: undefined as SavedTrip | undefined })),
-          ...bookTrips.filter(item => item.day.slice(0, 10) === info.day).map(item => ({ odo: item.start_odo, item: undefined as Trip | undefined, book: item }))]
-          .sort((a, b) => a.odo - b.odo);
+        const entries = [
+          ...draft.trips.filter(item => item.day === info.day).map(item => ({ id: item.id, movable: true, node: tripButton(item) })),
+          ...bookTrips.filter(item => item.day.slice(0, 10) === info.day).map(item => ({ id: item.key, movable: false, node: bookTripRow(item) })),
+          ...bookFuel.filter(item => item.day.slice(0, 10) === info.day).map(item => ({ id: item.key, movable: item.odo == null, node: <>{bookFuelRow(item)}{normHint(item.key)}</> })),
+          ...draft.receipts.filter(item => item.day === info.day).map(item => ({ id: item.id, movable: item.odo == null, node: <>{receiptButton(item)}{normHint(item.id)}</> })),
+        ].sort((a, b) => rank(a.id) - rank(b.id));
+        dayIds[info.day] = entries.map(entry => entry.id);
         if (draft.tank?.days[info.day] != null) level = Number(draft.tank.days[info.day]);
-        const empty = !fuels.length && !books.length && !rows.length;
+        const empty = !entries.length;
         if (info.after_reading && empty) return null;  // za dátumom odčítania tachometra sa nič neplánuje; deň s tankovaním ostane viditeľný
         const off = info.weekend || info.holiday;
         const note = info.before_start ? 'pred začiatkom evidencie' : info.after_reading ? 'po odčítaní tachometra'
           : info.holiday ? 'sviatok' : info.weekend ? 'víkend' : '';
         return <li key={info.day} className={'md-day' + (off ? ' off' : '') + (info.after_reading || info.before_start ? ' out' : '') + (empty ? ' empty' : '')}>
           <div className="md-date"><b>{WEEKDAYS[date.getDay()]}</b> {date.getDate()}. {date.getMonth() + 1}.</div>
-          <div className="md-items">
-            {rows.map(({ item, book }) => book
-              ? <div key={book.key} className="md-item trip book">
-                <span className="md-main"><b>{book.destination || 'jazda'}</b> · {fmt(book.distance, 0)} km{used(book.key)}
-                  <small> · {fmt(book.start_odo, 0)} → {fmt(book.end_odo, 0)}</small></span>
-                <span className="md-tags"><span className="md-tag book">v knihe</span></span></div>
-              : item && <button key={rowKey(item.id)} type="button" disabled={locked}
-                className={'md-item trip' + (lit.has(item.id) ? ' changed' : '') + (item.warning ? ' warn' : '')}
-                onClick={() => setEditing({ kind: 'trip', id: item.id })}>
-                <span className="md-main"><b>{item.destination}</b> · {fmt(item.distance, 0)} km{used(item.id)}
-                  <small> · {fmt(item.start_odo, 0)} → {fmt(item.end_odo, 0)}</small></span>
-                <span className="md-tags">
-                  <span className={'md-tag' + (item.day_confirmed && item.km_confirmed ? ' sure' : '')}>
-                    {item.day_confirmed && item.km_confirmed ? 'potvrdené' : item.day_confirmed ? 'deň potvrdený' : item.km_confirmed ? 'km potvrdené' : 'odhad'}</span>
-                  {item.warning && <Tooltip title={item.warning}><span className="md-tag bad">⚠</span></Tooltip>}</span>
-              </button>)}
-            {books.map(item => <div key={item.key} className="md-item fuel book">
-              <span className="md-icon" aria-hidden>⛽</span>
-              <span className="md-main">{fmt(item.liters, 2)} l · {fmt(item.gross, 2)} €<small> · {item.station}</small>{sinceRefuel(item.key)}</span>
-              <span className="md-tags"><Tooltip title={item.note || 'kniha jázd'}><span className="md-tag book">v knihe</span></Tooltip></span></div>)}
-            {fuels.map(receiptButton)}
+          <div className="md-items" onClickCapture={event => { if (dragged.current) { event.stopPropagation(); event.preventDefault(); } }}>
+            <SortableContext items={dayIds[info.day]} strategy={verticalListSortingStrategy}>
+              {entries.map(entry => <SortRow key={rowKey(entry.id)} id={entry.id} disabled={locked || !entry.movable || entries.length < 2}>{entry.node}</SortRow>)}
+            </SortableContext>
             {empty && <span className="md-none">{note || '–'}</span>}
           </div>
-          <div className="md-tank" title="V nádrži na konci dňa (podľa normy)">{draft.tank?.planned && !info.before_start && !info.after_reading ? fmt(level, 1) + ' l' : ''}</div>
+          <div className="md-tank" title="V nádrži na konci dňa (po tankovaní plná)">{draft.tank?.planned && !info.before_start && !info.after_reading ? fmt(level, 1) + ' l' : ''}</div>
           <div className="md-add">{!saved && !info.before_start && !info.after_reading && <IconButton size="small" disabled={locked}
             aria-label={'Pridať k ' + date.getDate() + '. ' + (date.getMonth() + 1) + '.'} onClick={event => setAdding({ anchor: event.currentTarget, day: info.day })}>+</IconButton>}</div>
         </li>;
       })}</ol>
+      </DndContext>
+      {!saved && draft.trips.length > 0 && <p className="muted">Jazdy a tankovania v rámci dňa môžete potiahnuť do poradia, v akom sa stali
+        (na mobile riadok podržte a potom ťahajte). Tankovanie s tachometrom sa radí podľa neho.</p>}
       {draft.days.some(info => info.after_reading) && <p className="muted">Dni po {new Date(readDay + 'T12:00:00').getDate()}. {new Date(readDay + 'T12:00:00').getMonth() + 1}. ako dátum odčítania tachometra sa nezobrazujú (okrem dní s tankovaním).</p>}
       <Menu anchorEl={adding?.anchor} open={Boolean(adding)} onClose={() => setAdding(undefined)}>
         <MenuItem onClick={() => { const day = adding!.day; setAdding(undefined); void addRow('add_trip', day); }}>Pridať jazdu</MenuItem>
